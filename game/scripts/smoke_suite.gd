@@ -86,6 +86,19 @@ func run(game: Node) -> void:
 		await game.get_tree().physics_frame
 		if game.accepted.size() >= 1 or game.state != "running": break
 	check(game.accepted.size() == 1 and game.height_m > 0.8,"real falling crate settles on base")
+	game.next_index = 0
+	for i in range(60): await game.get_tree().physics_frame
+	game.manual_x = 0
+	game.manual_z = 0
+	await game.get_tree().physics_frame
+	game.drop_active()
+	for i in range(900):
+		await game.get_tree().physics_frame
+		if game.accepted.size() >= 2 or game.state != "running": break
+	check(game.accepted.size() == 2 and game.height_m > 1.7,"second crate collides with first and forms tower")
+	var before_undo = game.height_m
+	game.use_undo()
+	check(game.accepted.size() == 1 and game.height_m < before_undo,"undo removes top body and recalculates height")
 	# The arch gap must not be filled by a bounding-box collider.
 	game.set_physics_process(false)
 	var arch = game.make_block(7)

@@ -19,12 +19,23 @@ const BLOCKS = [
 	 "parts":[[Vector3(0,0.4,0),Vector3(1.6,0.4,0.65)],[Vector3(0,-0.2,0),Vector3(0.5,0.8,0.65)]]},
 	{"id":"step", "vi":"Bậc thang lạ", "en":"Odd staircase", "size":Vector3(1.5,0.9,0.85), "mass":1.15,
 	 "parts":[[Vector3(0,-0.3,0),Vector3(1.5,0.3,0.85)],[Vector3(0.25,0,0),Vector3(1.0,0.3,0.85)],[Vector3(0.5,0.3,0),Vector3(0.5,0.3,0.85)]]},
-	{"id":"ufo", "vi":"Đĩa bay mini", "en":"Mini UFO", "size":Vector3(1.6,0.6,1.6), "mass":1.1, "cylinder":true},
+	{"id":"ufo", "vi":"Đĩa bay mini", "en":"Mini UFO", "size":Vector3(1.6,0.6,1.6), "mass":1.1,
+	 "cylinders":[[Vector3(0,-0.14,0),0.8,0.32],[Vector3(0,0.16,0),0.43,0.28]]},
 	{"id":"dice", "vi":"Xúc xắc may mắn", "en":"Lucky dice", "size":Vector3(0.95,0.95,0.95), "mass":1.0}
 ]
 
 static func add_colliders(body: RigidBody3D, spec: Dictionary) -> void:
-	if spec.has("parts"):
+	if spec.has("cylinders"):
+		for part in spec.cylinders:
+			var shape = CylinderShape3D.new()
+			shape.radius = part[1]
+			shape.height = part[2]
+			shape.margin = 0.008
+			var node = CollisionShape3D.new()
+			node.shape = shape
+			node.position = part[0]
+			body.add_child(node)
+	elif spec.has("parts"):
 		for part in spec.parts:
 			var shape = BoxShape3D.new()
 			shape.size = part[1]

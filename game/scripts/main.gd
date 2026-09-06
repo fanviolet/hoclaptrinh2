@@ -364,6 +364,7 @@ func close_modal() -> void:
 
 func _notification(what: int) -> void:
 	if what == NOTIFICATION_APPLICATION_PAUSED and is_instance_valid(ui):
+		bank_coins()
 		save_game()
 		show_settings()
 

@@ -35,4 +35,3 @@ rotate_left={"deadzone":0.5,"events":[Object(InputEventKey,"physical_keycode":81
 rotate_right={"deadzone":0.5,"events":[Object(InputEventKey,"physical_keycode":69)]}
 move_left={"deadzone":0.5,"events":[Object(InputEventKey,"physical_keycode":65)]}
 move_right={"deadzone":0.5,"events":[Object(InputEventKey,"physical_keycode":68)]}
-
