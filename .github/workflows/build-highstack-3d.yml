@@ -1,0 +1,86 @@
+name: Build HighStack 3D APK
+
+on:
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK 36
+        run: |
+          sdkmanager "platform-tools" "platforms;android-36" "build-tools;36.0.0"
+
+      - name: Download Blender 5.2.1 LTS
+        run: |
+          curl -L --retry 3 -o blender.tar.xz https://download.blender.org/release/Blender5.2/blender-5.2.1-linux-x64.tar.xz
+          tar -xf blender.tar.xz
+          mv blender-5.2.1-linux-x64 blender
+          ./blender/blender --version | head -n 2
+
+      - name: Generate original 3D asset pack with Blender
+        run: |
+          mkdir -p game/assets/models
+          ./blender/blender -b --python tools/blender_assets.py
+          ls -lh game/assets/models
+
+      - name: Download Godot 4.7.2 and Android templates
+        run: |
+          curl -L --retry 3 -o godot.zip https://github.com/godotengine/godot/releases/download/4.7.2-stable/Godot_v4.7.2-stable_linux.x86_64.zip
+          unzip -q godot.zip -d godot-bin
+          chmod +x godot-bin/Godot_v4.7.2-stable_linux.x86_64
+          sudo ln -sf "$PWD/godot-bin/Godot_v4.7.2-stable_linux.x86_64" /usr/local/bin/godot
+          godot --version
+          curl -L --retry 3 -o templates.tpz https://github.com/godotengine/godot/releases/download/4.7.2-stable/Godot_v4.7.2-stable_export_templates.tpz
+          mkdir -p "$HOME/.local/share/godot/export_templates/4.7.2.stable"
+          unzip -j templates.tpz 'templates/android_debug.apk' 'templates/android_release.apk' -d "$HOME/.local/share/godot/export_templates/4.7.2.stable"
+          ls -lh "$HOME/.local/share/godot/export_templates/4.7.2.stable"
+
+      - name: Create debug signing key
+        run: |
+          keytool -genkeypair -v -keystore "$RUNNER_TEMP/highstack-debug.keystore" -storepass android -alias androiddebugkey -keypass android -dname "CN=HighStack Debug,O=HighStack Studio,C=VN" -keyalg RSA -keysize 2048 -validity 10000
+
+      - name: Import project assets
+        env:
+          ANDROID_HOME: ${{ env.ANDROID_HOME }}
+          ANDROID_SDK_ROOT: ${{ env.ANDROID_SDK_ROOT }}
+        run: |
+          godot --headless --editor --path game --quit
+
+      - name: Export signed debug APK
+        env:
+          GODOT_ANDROID_KEYSTORE_DEBUG_PATH: ${{ runner.temp }}/highstack-debug.keystore
+          GODOT_ANDROID_KEYSTORE_DEBUG_USER: androiddebugkey
+          GODOT_ANDROID_KEYSTORE_DEBUG_PASSWORD: android
+          ANDROID_HOME: ${{ env.ANDROID_HOME }}
+          ANDROID_SDK_ROOT: ${{ env.ANDROID_SDK_ROOT }}
+        run: |
+          mkdir -p build
+          godot --headless --path game --export-debug Android "$PWD/build/HighStack3D-3D-v0.2.apk"
+
+      - name: Verify APK
+        run: |
+          test -s build/HighStack3D-3D-v0.2.apk
+          unzip -t build/HighStack3D-3D-v0.2.apk >/dev/null
+          sha256sum build/HighStack3D-3D-v0.2.apk | tee build/HighStack3D-3D-v0.2.sha256
+          du -h build/HighStack3D-3D-v0.2.apk
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: HighStack3D-3D-APK
+          path: |
+            build/HighStack3D-3D-v0.2.apk
+            build/HighStack3D-3D-v0.2.sha256
+          if-no-files-found: error
