@@ -36,36 +36,8 @@ jobs:
           ./blender/blender -b --python tools/blender_assets.py
           ls -lh game/assets/models
 
-      - name: Apply Godot 4.7 strict-typing and Android export fixes
-        run: |
-          python3 - <<'PY'
-          from pathlib import Path
-          p = Path('game/scripts/main.gd')
-          s = p.read_text()
-          fixes = {
-              'var target_y := max(2.7,height_m+1.75)': 'var target_y: float = maxf(2.7,height_m+1.75)',
-              'var gained := max(0.0,top-height_m)': 'var gained: float = maxf(0.0,top-height_m)',
-              'var rp_gain := clamp(int(score/240.0)-20,0,180)': 'var rp_gain: int = clampi(int(score/240.0)-20,0,180)',
-              'var b := accepted.pop_back()': 'var b: RigidBody3D = accepted.pop_back() as RigidBody3D',
-              'var lv := skills[i]': 'var lv: int = int(skills[i])',
-              'var cost := SKILL_COSTS[min(lv,SKILL_COSTS.size()-1)]': 'var cost: int = int(SKILL_COSTS[mini(lv,SKILL_COSTS.size()-1)])',
-              'var cost := SKILL_COSTS[skills[i]]': 'var cost: int = int(SKILL_COSTS[int(skills[i])])',
-          }
-          for a,b in fixes.items():
-              s = s.replace(a,b)
-          p.write_text(s)
-
-          p = Path('game/project.godot')
-          s = p.read_text()
-          if 'textures/vram_compression/import_etc2_astc=true' not in s:
-              s = s.replace('textures/default_filters/use_nearest_mipmap_filter=false', 'textures/default_filters/use_nearest_mipmap_filter=false\ntextures/vram_compression/import_etc2_astc=true')
-          p.write_text(s)
-
-          p = Path('game/export_presets.cfg')
-          s = p.read_text()
-          s = '\n'.join(line for line in s.splitlines() if not line.startswith('gradle_build/min_sdk=') and not line.startswith('gradle_build/target_sdk=')) + '\n'
-          p.write_text(s)
-          PY
+      - name: Generate original music and sound effects
+        run: python3 tools/audio_assets.py
 
       - name: Download Godot 4.7.2 and Android templates
         run: |
@@ -92,7 +64,10 @@ jobs:
 
       - name: Runtime smoke test
         run: |
-          godot --headless --path game --quit-after 60
+          mkdir -p build
+          timeout 120 godot --headless --path game -- --smoke 2>&1 | tee build/smoke.log
+          grep -q "HIGHSTACK_SMOKE: .*checks, 0 failures" build/smoke.log
+          ! grep -E "SCRIPT ERROR|^ERROR:" build/smoke.log
 
       - name: Export signed debug APK
         env:
@@ -103,19 +78,51 @@ jobs:
           ANDROID_SDK_ROOT: ${{ env.ANDROID_SDK_ROOT }}
         run: |
           mkdir -p build
-          godot --headless --path game --export-debug Android "$PWD/build/HighStack3D-3D-v0.2.apk"
+          godot --headless --path game --export-debug Android "$PWD/build/HighStack3D-v0.3.0.apk"
 
       - name: Verify APK
         run: |
-          test -s build/HighStack3D-3D-v0.2.apk
-          unzip -t build/HighStack3D-3D-v0.2.apk >/dev/null
-          sha256sum build/HighStack3D-3D-v0.2.apk | tee build/HighStack3D-3D-v0.2.sha256
-          du -h build/HighStack3D-3D-v0.2.apk
+          test -s build/HighStack3D-v0.3.0.apk
+          unzip -t build/HighStack3D-v0.3.0.apk >/dev/null
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose build/HighStack3D-v0.3.0.apk | tee build/signature.txt
+          sha256sum build/HighStack3D-v0.3.0.apk | tee build/HighStack3D-v0.3.0.sha256
+          du -h build/HighStack3D-v0.3.0.apk
+
+      - name: Enable KVM for Android smoke test
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Install and launch APK on Android emulator
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          arch: x86_64
+          profile: pixel_2
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+          script: |
+            adb install build/HighStack3D-v0.3.0.apk
+            adb logcat -c
+            adb shell monkey -p com.highstackstudio.highstack3d 1
+            sleep 8
+            adb shell pidof com.highstackstudio.highstack3d
+            adb shell input tap 540 1740
+            sleep 5
+            adb shell pidof com.highstackstudio.highstack3d
+            adb exec-out screencap -p > build/android-gameplay.png
+            adb logcat -d > build/android-logcat.txt
+            ! grep -E 'FATAL EXCEPTION|SCRIPT ERROR|Parse Error' build/android-logcat.txt
 
       - uses: actions/upload-artifact@v4
         with:
           name: HighStack3D-3D-APK
           path: |
-            build/HighStack3D-3D-v0.2.apk
-            build/HighStack3D-3D-v0.2.sha256
+            build/HighStack3D-v0.3.0.apk
+            build/HighStack3D-v0.3.0.sha256
+            build/smoke.log
+            build/signature.txt
+            build/android-gameplay.png
+            build/android-logcat.txt
           if-no-files-found: error

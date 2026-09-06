@@ -1,677 +1,841 @@
 extends Node3D
 
-const BLOCKS := [
-	{"id":"crate","label":"Thùng gỗ","size":Vector3(1.15,0.95,1.15),"mass":1.20,"model":"res://assets/models/crate.glb"},
-	{"id":"book","label":"Quyển sách","size":Vector3(1.55,0.30,0.95),"mass":0.75,"model":"res://assets/models/book.glb"},
-	{"id":"brick","label":"Viên gạch","size":Vector3(1.10,0.48,0.62),"mass":1.55,"model":"res://assets/models/brick.glb"},
-	{"id":"plank","label":"Thanh gỗ","size":Vector3(1.95,0.24,0.52),"mass":0.85,"model":"res://assets/models/plank.glb"},
-	{"id":"can","label":"Lon kim loại","size":Vector3(0.72,1.10,0.72),"mass":0.95,"model":"res://assets/models/can.glb","cylinder":true},
-	{"id":"barrel","label":"Thùng tròn","size":Vector3(0.95,1.20,0.95),"mass":1.10,"model":"res://assets/models/barrel.glb","cylinder":true},
-	{"id":"carton","label":"Hộp carton","size":Vector3(1.20,0.82,0.92),"mass":0.72,"model":"res://assets/models/carton.glb"}
-]
-const SKILL_NAMES := ["Grip","Shock Absorber","Balanced Core","Light Wood","Perfect Bonus"]
-const SKILL_COSTS := [500,1200,2500,5000,8000]
-const RANKS := [
-	[0,"Bronze"],[400,"Silver"],[1000,"Gold"],[1900,"Platinum"],[3100,"Diamond"],[4700,"Master"],[6800,"Grandmaster"],[9500,"Legend"]
-]
-
-var rng := RandomNumberGenerator.new()
+const Catalog = preload("res://scripts/catalog.gd")
+const Sound = preload("res://scripts/audio.gd")
+const Arena = preload("res://scripts/arena_session.gd")
+const SAVE_PATH = "user://highstack.cfg"
+const SKILL_NAMES = [["Bám chắc","Grip"],["Giảm chấn","Shock absorber"],["Cân bằng","Balanced core"],["Gỗ nhẹ","Light wood"],["Thưởng Perfect","Perfect bonus"]]
+const COSTS = [500,1200,2500,5000,8000]
+var settings = {"music":0.45,"sfx":0.8,"language":"vi","shadows":true,"vibration":true,"motion":true}
+var coins = 900
+var skills = [0,0,0,0,0]
+var rescue = {"stabilizer":1,"safety":1,"undo":1}
+var owned_themes = ["day"]
+var selected_theme = "day"
+var best_score = 0
+var best_height = 0.0
+var rank_points = 0
+var save_path = SAVE_PATH
+var rng = RandomNumberGenerator.new()
 var camera: Camera3D
+var sun: DirectionalLight3D
+var environment: Environment
+var audio: Node
+var arena = Arena.new()
 var active: RigidBody3D
-var active_spec: Dictionary
 var accepted: Array[RigidBody3D] = []
-var elapsed := 0.0
-var drop_age := 0.0
-var settle_time := 0.0
-var manual_x := 0.0
-var game_state := "running"
-var mode := "casual"
-var height_m := 0.0
-var score := 0
-var run_coins := 0
-var coins := 900
-var rank_points := 0
-var combo := 0
-var revive_used := false
-var safety_armed := false
-var rescue := {"stabilizer":1,"safety":1,"undo":1}
-var skills := [0,0,0,0,0]
-var best_score := 0
-var best_height := 0.0
-var status_label: Label
-var height_label: Label
-var score_label: Label
-var coin_label: Label
-var item_label: Label
-var rank_label: Label
+var ghost: MeshInstance3D
+var mascot: Node3D
+var world_decor: Node3D
+var ui: Control
 var modal: PanelContainer
 var modal_title: Label
 var modal_body: VBoxContainer
-var result_panel: PanelContainer
-var result_text: Label
-var gameplay_buttons: Array[Button] = []
-var mascot: Node3D
+var hud: Label
+var status: Label
+var inventory: Label
+var arena_hud: Label
+var root_column: VBoxContainer
+var mode = "casual"
+var state = "running"
+var height_m = 0.0
+var height_record = 0.0
+var score = 0
+var run_coins = 0
+var combo = 0
+var paid_coins = 0
+var safety_armed = false
+var drop_age = 0.0
+var settle_time = 0.0
+var spawn_wait = 0.0
+var elapsed = 0.0
+var status_time = 0.0
+var manual_x = 0.0
+var manual_z = 0.0
+var top_point = Vector3.ZERO
+var next_index = 0
+var drop_origin = Vector3.ZERO
+var impact_cooldown = 0.0
+var difficulty = 1
+var test_mode = false
+var preview_count = 0
+
+func t(vi: String, en: String) -> String:
+	return vi if settings.language == "vi" else en
 
 func _ready() -> void:
-	rng.randomize()
+	test_mode = "--smoke" in OS.get_cmdline_user_args()
+	if test_mode: save_path = "user://highstack-smoke.cfg"
 	load_save()
+	rng.randomize()
+	audio = Sound.new()
+	add_child(audio)
+	audio.apply_settings(settings)
 	build_world()
 	build_ui()
-	spawn_block()
-	update_ui()
+	arena.match_finished.connect(func(): finish_run(false))
+	restart_run()
+	if test_mode: call_deferred("run_smoke")
+	if "--capture" in OS.get_cmdline_user_args(): call_deferred("capture_preview")
+
+func material(color: Color, rough: float = 0.4) -> StandardMaterial3D:
+	var mat = StandardMaterial3D.new()
+	mat.albedo_color = color
+	mat.roughness = rough
+	return mat
+
+func mesh_node(mesh: Mesh, pos: Vector3, mat: Material, parent: Node) -> MeshInstance3D:
+	var node = MeshInstance3D.new()
+	node.mesh = mesh
+	node.position = pos
+	node.material_override = mat
+	parent.add_child(node)
+	return node
 
 func build_world() -> void:
-	var env := WorldEnvironment.new()
-	var e := Environment.new()
-	e.background_mode = Environment.BG_COLOR
-	e.background_color = Color("#78c8ff")
-	e.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
-	e.ambient_light_color = Color("#d9f1ff")
-	e.ambient_light_energy = 0.85
-	e.tonemap_mode = Environment.TONE_MAPPER_FILMIC
-	env.environment = e
-	add_child(env)
-
-	var sun := DirectionalLight3D.new()
-	sun.rotation_degrees = Vector3(-48,-28,0)
-	sun.light_energy = 1.35
-	sun.shadow_enabled = true
+	environment = Environment.new()
+	environment.background_mode = Environment.BG_SKY
+	var sky = Sky.new()
+	var sky_mat = ProceduralSkyMaterial.new()
+	sky_mat.sky_top_color = Color("428fdd")
+	sky_mat.sky_horizon_color = Color("f7dbb6")
+	sky_mat.ground_bottom_color = Color("768bc3")
+	sky_mat.ground_horizon_color = Color("f7dbb6")
+	sky.sky_material = sky_mat
+	environment.sky = sky
+	environment.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
+	environment.ambient_light_color = Color("d3e7ff")
+	environment.ambient_light_energy = 0.35
+	environment.tonemap_mode = Environment.TONE_MAPPER_LINEAR
+	var world = WorldEnvironment.new()
+	world.environment = environment
+	add_child(world)
+	sun = DirectionalLight3D.new()
+	sun.rotation_degrees = Vector3(-42,-30,0)
+	sun.light_energy = 0.85
+	sun.shadow_enabled = settings.shadows
+	sun.directional_shadow_max_distance = 60
 	add_child(sun)
-	var fill := DirectionalLight3D.new()
-	fill.rotation_degrees = Vector3(-25,145,0)
-	fill.light_energy = 0.45
-	fill.light_color = Color("#b9d7ff")
+	var fill = DirectionalLight3D.new()
+	fill.rotation_degrees = Vector3(-20,140,0)
+	fill.light_color = Color("acc9ff")
+	fill.light_energy = 0.2
 	add_child(fill)
-
 	camera = Camera3D.new()
-	camera.position = Vector3(7.2,6.2,9.3)
-	camera.fov = 47.0
+	camera.projection = Camera3D.PROJECTION_ORTHOGONAL
+	camera.keep_aspect = Camera3D.KEEP_WIDTH
+	camera.size = 7.8
 	camera.current = true
+	camera.far = 180
 	add_child(camera)
-	camera.look_at(Vector3(0,2.2,0))
-
-	var base := StaticBody3D.new()
+	camera.position = Vector3(6,6,10)
+	camera.look_at(Vector3.ZERO)
+	var base = StaticBody3D.new()
 	base.name = "Base"
-	var base_mesh := MeshInstance3D.new()
-	var cylinder := CylinderMesh.new()
-	cylinder.top_radius = 2.65
-	cylinder.bottom_radius = 2.9
-	cylinder.height = 0.55
-	cylinder.radial_segments = 48
-	base_mesh.mesh = cylinder
-	base_mesh.position.y = 0.0
-	var mat := StandardMaterial3D.new()
-	mat.albedo_color = Color("#f4f6ff")
-	mat.roughness = 0.42
-	mat.metallic = 0.04
-	base_mesh.material_override = mat
-	base.add_child(base_mesh)
-	var col := CollisionShape3D.new()
-	var shape := CylinderShape3D.new()
-	shape.radius = 2.65
-	shape.height = 0.55
-	col.shape = shape
-	base.add_child(col)
-	base.position.y = -0.28
+	base.position.y = -0.3
 	add_child(base)
+	var cylinder = CylinderMesh.new()
+	cylinder.top_radius = 2.45
+	cylinder.bottom_radius = 2.65
+	cylinder.height = 0.6
+	cylinder.radial_segments = 64
+	mesh_node(cylinder,Vector3.ZERO,material(Color("f2ece8")),base)
+	var collider = CollisionShape3D.new()
+	var shape = CylinderShape3D.new()
+	shape.radius = 2.45
+	shape.height = 0.6
+	collider.shape = shape
+	base.add_child(collider)
+	var pm = PhysicsMaterial.new()
+	pm.friction = 0.9
+	base.physics_material_override = pm
+	var rim = TorusMesh.new()
+	rim.inner_radius = 2.38
+	rim.outer_radius = 2.5
+	mesh_node(rim,Vector3(0,-0.02,0),material(Color("36c6ca")),self)
+	var island = CylinderMesh.new()
+	island.top_radius = 2.6
+	island.bottom_radius = 0.65
+	island.height = 2.4
+	island.radial_segments = 10
+	mesh_node(island,Vector3(0,-1.75,0),material(Color("7285a9"),0.8),self)
+	world_decor = Node3D.new()
+	add_child(world_decor)
+	# Distant floating islands and soft cloud clusters remain readable at any tower height.
+	var decor_rng = RandomNumberGenerator.new()
+	decor_rng.seed = 2389
+	for i in range(12):
+		var pos = Vector3((-1 if i%2 else 1)*decor_rng.randf_range(3.6,6.0),decor_rng.randf_range(-6,8),-42)
+		var rock = CylinderMesh.new()
+		rock.top_radius = decor_rng.randf_range(0.5,1.1)
+		rock.bottom_radius = 0.15
+		rock.height = decor_rng.randf_range(0.8,2)
+		rock.radial_segments = 7
+		mesh_node(rock,pos,material(Color.from_hsv(0.48+i*0.008,0.3,0.68),0.8),world_decor)
+		for j in range(3):
+			var cloud = SphereMesh.new()
+			cloud.radius = decor_rng.randf_range(0.3,0.65)
+			cloud.height = cloud.radius*1.1
+			mesh_node(cloud,pos+Vector3(j*0.4-0.4,1.1,0),material(Color("e2e8f7"),0.9),world_decor)
+	var path = "res://assets/models/mascot.glb"
+	if ResourceLoader.exists(path):
+		mascot = load(path).instantiate()
+		mascot.position = Vector3(-2.7,0,0)
+		mascot.scale = Vector3.ONE*0.7
+		add_child(mascot)
+	ghost = MeshInstance3D.new()
+	var ghost_mesh = CylinderMesh.new()
+	ghost_mesh.top_radius = 0.45
+	ghost_mesh.bottom_radius = 0.45
+	ghost_mesh.height = 0.018
+	ghost.mesh = ghost_mesh
+	var ghost_mat = material(Color(0.2,1,0.85,0.45))
+	ghost_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	ghost_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	ghost.material_override = ghost_mat
+	ghost.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	add_child(ghost)
+	apply_theme()
 
-	for i in range(18):
-		var deco := MeshInstance3D.new()
-		var box := BoxMesh.new()
-		box.size = Vector3(rng.randf_range(0.6,1.4),rng.randf_range(1.5,5.5),rng.randf_range(0.6,1.4))
-		deco.mesh = box
-		var angle := TAU * float(i)/18.0
-		var rad := rng.randf_range(9.0,14.0)
-		deco.position = Vector3(cos(angle)*rad,box.size.y*0.5-0.3,sin(angle)*rad)
-		var dm := StandardMaterial3D.new()
-		dm.albedo_color = Color.from_hsv(float(i)/18.0,0.28,0.92)
-		dm.roughness = 0.8
-		deco.material_override = dm
-		add_child(deco)
-
-	mascot = create_mascot()
-	mascot.position = Vector3(3.7,0.15,0.4)
-	mascot.rotation_degrees.y = -18
-	add_child(mascot)
-
-func create_mascot() -> Node3D:
-	if ResourceLoader.exists("res://assets/models/mascot.glb"):
-		var ps = load("res://assets/models/mascot.glb")
-		if ps is PackedScene:
-			return ps.instantiate()
-	var root := Node3D.new()
-	var body := MeshInstance3D.new()
-	var sphere := SphereMesh.new()
-	sphere.radius = 0.55
-	sphere.height = 1.35
-	body.mesh = sphere
-	body.position.y = 0.85
-	var m := StandardMaterial3D.new()
-	m.albedo_color = Color("#ff9a4a")
-	m.roughness = 0.55
-	body.material_override = m
-	root.add_child(body)
-	return root
+func style(bg: Color, radius: int = 18) -> StyleBoxFlat:
+	var box = StyleBoxFlat.new()
+	box.bg_color = bg
+	box.set_corner_radius_all(radius)
+	box.content_margin_left = 18
+	box.content_margin_right = 18
+	box.content_margin_top = 12
+	box.content_margin_bottom = 12
+	return box
 
 func build_ui() -> void:
-	var layer := CanvasLayer.new()
-	add_child(layer)
-	var root := Control.new()
-	root.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	layer.add_child(root)
-
-	var top := HBoxContainer.new()
-	top.position = Vector2(18,18)
-	top.size = Vector2(684,68)
-	top.add_theme_constant_override("separation",12)
-	root.add_child(top)
-	height_label = make_pill(top,"0.0 m")
-	score_label = make_pill(top,"0 pts")
-	coin_label = make_pill(top,"🪙 0")
-	rank_label = make_pill(top,"Bronze")
-
-	status_label = Label.new()
-	status_label.position = Vector2(18,95)
-	status_label.size = Vector2(684,42)
-	status_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	status_label.add_theme_font_size_override("font_size",20)
-	status_label.add_theme_color_override("font_color",Color("#17334b"))
-	root.add_child(status_label)
-
-	item_label = Label.new()
-	item_label.position = Vector2(18,1130)
-	item_label.size = Vector2(684,36)
-	item_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	item_label.add_theme_font_size_override("font_size",17)
-	item_label.add_theme_color_override("font_color",Color.WHITE)
-	root.add_child(item_label)
-
-	var row := HBoxContainer.new()
-	row.position = Vector2(18,1180)
-	row.size = Vector2(684,78)
-	row.add_theme_constant_override("separation",9)
-	root.add_child(row)
-	add_action(row,"◀",func(): shift_active(-0.28))
-	add_action(row,"↶",func(): rotate_active(-15.0))
-	add_action(row,"DROP",drop_active,true)
-	add_action(row,"↷",func(): rotate_active(15.0))
-	add_action(row,"▶",func(): shift_active(0.28))
-
-	var side := VBoxContainer.new()
-	side.position = Vector2(18,155)
-	side.size = Vector2(170,390)
-	side.add_theme_constant_override("separation",8)
-	root.add_child(side)
-	add_small(side,"🧲 Stabilizer",use_stabilizer)
-	add_small(side,"🛟 Safety",arm_safety)
-	add_small(side,"🏗 Undo",use_undo)
-	add_small(side,"🛒 Shop",show_shop)
-	add_small(side,"🪵 Skills",show_skills)
-	add_small(side,"🏆 Rank",show_rank)
-	add_small(side,"⇄ Mode",toggle_mode)
-
+	if is_instance_valid(ui):
+		ui.get_parent().remove_child(ui)
+		ui.queue_free()
+	var layer = get_node_or_null("Interface")
+	if layer == null:
+		layer = CanvasLayer.new()
+		layer.name = "Interface"
+		layer.process_mode = Node.PROCESS_MODE_ALWAYS
+		add_child(layer)
+	ui = Control.new()
+	ui.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	ui.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	layer.add_child(ui)
+	var theme = Theme.new()
+	theme.default_font_size = 22
+	theme.set_stylebox("normal","Button",style(Color("17354f")))
+	theme.set_stylebox("hover","Button",style(Color("245773")))
+	theme.set_stylebox("pressed","Button",style(Color("158f99")))
+	theme.set_stylebox("disabled","Button",style(Color("465564")))
+	theme.set_stylebox("panel","PanelContainer",style(Color("102b43"),26))
+	theme.set_color("font_color","Label",Color("eef6ff"))
+	theme.set_color("font_color","Button",Color("eef6ff"))
+	ui.theme = theme
+	var margin = MarginContainer.new()
+	margin.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	for side in ["left","right"]: margin.add_theme_constant_override("margin_"+side,22)
+	for side in ["top","bottom"]: margin.add_theme_constant_override("margin_"+side,28)
+	margin.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	ui.add_child(margin)
+	root_column = VBoxContainer.new()
+	root_column.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	root_column.add_theme_constant_override("separation",12)
+	margin.add_child(root_column)
+	var header = HBoxContainer.new()
+	root_column.add_child(header)
+	var logo = label("HIGHSTACK",28)
+	logo.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	header.add_child(logo)
+	button(header,t("Cài đặt","Settings"),show_settings)
+	var panel = PanelContainer.new()
+	root_column.add_child(panel)
+	hud = label("",24)
+	hud.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	panel.add_child(hud)
+	var nav = HBoxContainer.new()
+	nav.add_theme_constant_override("separation",10)
+	root_column.add_child(nav)
+	button(nav,t("Cửa hàng","Store"),show_store)
+	button(nav,"Arena",show_arena)
+	button(nav,t("Kỹ năng","Skills"),show_skills)
+	button(nav,t("Chế độ","Mode"),show_modes)
+	arena_hud = label("",20)
+	arena_hud.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	root_column.add_child(arena_hud)
+	status = label("",22)
+	status.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	status.custom_minimum_size.y = 56
+	root_column.add_child(status)
+	var spacer = Control.new()
+	spacer.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	spacer.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	root_column.add_child(spacer)
+	inventory = label("",19)
+	inventory.add_theme_color_override("font_color",Color("102b43"))
+	inventory.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	root_column.add_child(inventory)
+	var items = HBoxContainer.new()
+	items.add_theme_constant_override("separation",8)
+	root_column.add_child(items)
+	button(items,t("Giữ vững","Stabilize"),use_stabilizer)
+	button(items,t("Cứu rơi","Safety"),arm_safety)
+	button(items,t("Gỡ khối","Undo"),use_undo)
+	var row = HBoxContainer.new()
+	row.add_theme_constant_override("separation",8)
+	root_column.add_child(row)
+	button(row,"↶",func(): rotate_active(-15))
+	var drop = button(row,t("THẢ KHỐI","DROP"),drop_active)
+	drop.custom_minimum_size = Vector2(280,82)
+	drop.add_theme_stylebox_override("normal",style(Color("139e9e")))
+	button(row,"↷",func(): rotate_active(15))
+	var hint = label(t("Kéo để di chuyển • A/D/W/S • Q/E xoay • Space thả","Drag to move • A/D/W/S • Q/E rotate • Space drop"),16)
+	hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	hint.add_theme_color_override("font_color",Color("102b43"))
+	root_column.add_child(hint)
+	var shade = ColorRect.new()
+	shade.name = "Shade"
+	shade.color = Color(0.01,0.04,0.1,0.72)
+	shade.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	shade.visible = false
+	ui.add_child(shade)
 	modal = PanelContainer.new()
-	modal.position = Vector2(85,250)
-	modal.size = Vector2(550,690)
+	modal.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	modal.offset_left = 32
+	modal.offset_right = -32
+	modal.offset_top = 150
+	modal.offset_bottom = -100
 	modal.visible = false
-	root.add_child(modal)
-	var mv := VBoxContainer.new()
-	mv.add_theme_constant_override("separation",14)
-	modal.add_child(mv)
-	modal_title = Label.new()
+	ui.add_child(modal)
+	var column = VBoxContainer.new()
+	column.add_theme_constant_override("separation",16)
+	modal.add_child(column)
+	modal_title = label("",30)
 	modal_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	modal_title.add_theme_font_size_override("font_size",30)
-	mv.add_child(modal_title)
+	column.add_child(modal_title)
+	var scroll = ScrollContainer.new()
+	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	column.add_child(scroll)
 	modal_body = VBoxContainer.new()
-	modal_body.add_theme_constant_override("separation",10)
-	mv.add_child(modal_body)
-	var close := Button.new()
-	close.text = "ĐÓNG"
-	close.custom_minimum_size.y = 58
-	close.pressed.connect(func(): modal.visible=false)
-	mv.add_child(close)
+	modal_body.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	modal_body.add_theme_constant_override("separation",12)
+	scroll.add_child(modal_body)
+	button(column,t("Đóng / Tiếp tục","Close / Resume"),close_modal)
+	update_ui()
 
-	result_panel = PanelContainer.new()
-	result_panel.position = Vector2(80,350)
-	result_panel.size = Vector2(560,480)
-	result_panel.visible = false
-	root.add_child(result_panel)
-	var rv := VBoxContainer.new()
-	rv.add_theme_constant_override("separation",14)
-	result_panel.add_child(rv)
-	var title := Label.new()
-	title.text = "TOWER DOWN"
-	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	title.add_theme_font_size_override("font_size",36)
-	rv.add_child(title)
-	result_text = Label.new()
-	result_text.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	result_text.add_theme_font_size_override("font_size",22)
-	rv.add_child(result_text)
-	var revive := Button.new()
-	revive.text = "▶ DEMO REWARDED AD — CỨU 1 LẦN"
-	revive.custom_minimum_size.y = 62
-	revive.pressed.connect(rewarded_revive)
-	rv.add_child(revive)
-	var again := Button.new()
-	again.text = "CHƠI LẠI"
-	again.custom_minimum_size.y = 62
-	again.pressed.connect(restart_run)
-	rv.add_child(again)
+func label(text: String, font_size: int = 22) -> Label:
+	var node = Label.new()
+	node.text = text
+	node.add_theme_font_size_override("font_size",font_size)
+	return node
 
-func make_pill(parent: Control, text_value: String) -> Label:
-	var l := Label.new()
-	l.text = text_value
-	l.custom_minimum_size = Vector2(154,54)
-	l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	l.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	l.add_theme_font_size_override("font_size",18)
-	l.add_theme_color_override("font_color",Color("#132b3b"))
-	parent.add_child(l)
-	return l
+func button(parent: Node, text: String, action: Callable) -> Button:
+	var node = Button.new()
+	node.text = text
+	node.custom_minimum_size.y = 62
+	node.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	node.pressed.connect(func(): audio.play("tap"); action.call())
+	parent.add_child(node)
+	return node
 
-func add_action(parent: Control, text_value: String, cb: Callable, primary := false) -> void:
-	var b := Button.new()
-	b.text = text_value
-	b.custom_minimum_size = Vector2(120 if not primary else 154,72)
-	b.add_theme_font_size_override("font_size",24 if primary else 20)
-	b.pressed.connect(cb)
-	parent.add_child(b)
-	gameplay_buttons.append(b)
+func note(text: String) -> void:
+	var node = label(text,21)
+	node.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	modal_body.add_child(node)
 
-func add_small(parent: Control, text_value: String, cb: Callable) -> void:
-	var b := Button.new()
-	b.text = text_value
-	b.custom_minimum_size = Vector2(166,52)
-	b.add_theme_font_size_override("font_size",15)
-	b.pressed.connect(cb)
-	parent.add_child(b)
+func message(vi: String, en: String) -> void:
+	status.text = t(vi,en)
+	status_time = 2.5
 
-func _process(delta: float) -> void:
+func show_modal(title: String) -> void:
+	get_tree().paused = true
+	ui.get_node("Shade").visible = true
+	for child in modal_body.get_children():
+		modal_body.remove_child(child)
+		child.queue_free()
+	modal_title.text = title
+	modal.visible = true
+
+func close_modal() -> void:
+	modal.visible = false
+	ui.get_node("Shade").visible = false
+	get_tree().paused = false
+
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_APPLICATION_PAUSED and is_instance_valid(ui):
+		save_game()
+		show_settings()
+
+func _physics_process(delta: float) -> void:
+	if state != "running": return
 	elapsed += delta
-	if mascot:
-		mascot.rotation_degrees.y = -18.0 + sin(elapsed*1.6)*5.0
-	if game_state != "running":
-		return
-	if active:
+	impact_cooldown = maxf(0,impact_cooldown-delta)
+	status_time = maxf(0,status_time-delta)
+	recalculate_height()
+	if mode == "arena":
+		arena.tick(delta)
+		if state != "running": return
+	if mascot and settings.motion: mascot.rotation.y = sin(elapsed)*0.16
+	if is_instance_valid(active):
 		if active.freeze:
-			var auto_x := sin(elapsed*1.55)*1.25
-			var auto_z := cos(elapsed*0.83)*0.42
-			active.position.x = clamp(auto_x + manual_x,-2.0,2.0)
-			active.position.z = auto_z
+			active.position = Vector3(manual_x,height_m+3.0+active.get_meta("spec").size.y*0.5,manual_z)
+			update_ghost()
 		else:
 			drop_age += delta
-			if active.position.y < -2.7 or abs(active.position.x) > 5.5 or abs(active.position.z) > 5.5:
-				handle_failure()
+			if active.position.y < -2.0 or Vector2(active.position.x,active.position.z).length() > 5:
+				if safety_armed and mode == "casual":
+					safety_armed = false
+					active.freeze = true
+					active.linear_velocity = Vector3.ZERO
+					active.angular_velocity = Vector3.ZERO
+					manual_x = 0
+					manual_z = 0
+					drop_age = 0
+					audio.play("rescue")
+				else:
+					finish_run(true)
 				return
-			if drop_age > 0.35 and active.get_contact_count() > 0 and active.linear_velocity.length() < 0.14 and active.angular_velocity.length() < 0.22:
-				settle_time += delta
-				if settle_time > 0.42:
-					accept_active()
-			else:
-				settle_time = 0.0
-	for b in accepted:
-		if is_instance_valid(b) and b.position.y < -2.7:
-			handle_failure()
+			var resting = active.get_contact_count() > 0 and active.linear_velocity.length() < 0.16 and active.angular_velocity.length() < 0.2
+			settle_time = settle_time+delta if resting else 0.0
+			if settle_time >= 0.5: accept_active()
+			elif drop_age > 14: finish_run(true)
+	elif spawn_wait > 0:
+		spawn_wait -= delta
+		if spawn_wait <= 0: spawn_block()
+	for body in accepted:
+		if body.position.y < -2.0:
+			finish_run(true)
 			return
-	update_camera(delta)
+	update_camera()
+	update_ui()
 
 func _unhandled_input(event: InputEvent) -> void:
-	if event.is_action_pressed("drop"):
-		drop_active()
-	elif event.is_action_pressed("rotate_left"):
-		rotate_active(-15)
-	elif event.is_action_pressed("rotate_right"):
-		rotate_active(15)
-	elif event.is_action_pressed("move_left"):
-		shift_active(-0.25)
-	elif event.is_action_pressed("move_right"):
-		shift_active(0.25)
+	if modal.visible or state != "running": return
+	if event is InputEventScreenDrag:
+		move_active(event.relative)
+	elif event is InputEventMouseMotion and Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT):
+		move_active(event.relative)
+	elif event is InputEventKey and event.pressed:
+		match event.physical_keycode:
+			KEY_SPACE: drop_active()
+			KEY_Q: rotate_active(-15)
+			KEY_E: rotate_active(15)
+			KEY_A: manual_x = clampf(manual_x-0.15,-2.2,2.2)
+			KEY_D: manual_x = clampf(manual_x+0.15,-2.2,2.2)
+			KEY_W: manual_z = clampf(manual_z-0.15,-1.8,1.8)
+			KEY_S: manual_z = clampf(manual_z+0.15,-1.8,1.8)
 
-func update_camera(delta: float) -> void:
-	var target_y := max(2.7,height_m+1.75)
-	camera.position.y = lerp(camera.position.y,target_y+3.0,delta*1.7)
-	var look := Vector3(0,target_y,0)
-	var desired := camera.global_transform.looking_at(look,Vector3.UP)
-	camera.global_transform.basis = camera.global_transform.basis.slerp(desired.basis,clamp(delta*2.5,0.0,1.0))
+func move_active(relative: Vector2) -> void:
+	if not is_instance_valid(active) or not active.freeze: return
+	# Screen-horizontal drags follow the camera's right vector on the base plane.
+	manual_x = clampf(manual_x + (relative.x*camera.global_basis.x.x-relative.y*0.5)*0.011,-2.2,2.2)
+	manual_z = clampf(manual_z + (relative.x*camera.global_basis.x.z+relative.y*0.8)*0.011,-1.8,1.8)
 
-func spawn_block() -> void:
-	if game_state != "running": return
-	active_spec = BLOCKS[rng.randi_range(0,BLOCKS.size()-1)].duplicate(true)
-	active = RigidBody3D.new()
-	active.name = "Active_%s" % active_spec.id
-	active.mass = float(active_spec.mass)
-	active.freeze = true
-	active.freeze_mode = RigidBody3D.FREEZE_MODE_KINEMATIC
-	active.contact_monitor = true
-	active.max_contacts_reported = 10
-	active.linear_damp = 0.14 + skills[1]*0.07
-	active.angular_damp = 0.18 + skills[1]*0.08
-	active.continuous_cd = true
-	active.position = Vector3(0,max(height_m+4.8,5.2),0)
-	active.set_meta("size",active_spec.size)
-	active.set_meta("kind",active_spec.id)
-	if active_spec.id in ["crate","plank"] and skills[3] > 0:
-		active.mass *= max(0.58,1.0-skills[3]*0.06)
-	var pm := PhysicsMaterial.new()
-	pm.friction = 0.62 + (skills[0]*0.08 if active_spec.id in ["crate","plank"] else 0.0)
-	pm.bounce = 0.03
-	active.physics_material_override = pm
-	if skills[2] > 0:
-		active.center_of_mass_mode = RigidBody3D.CENTER_OF_MASS_MODE_CUSTOM
-		active.center_of_mass = Vector3(0,-0.04*skills[2],0)
-	add_child(active)
-	add_block_visual(active,active_spec)
-	add_block_collision(active,active_spec)
-	manual_x = 0.0
-	drop_age = 0.0
-	settle_time = 0.0
-	status_label.text = "%s · căn vị trí rồi DROP" % active_spec.label
-
-func add_block_visual(body: RigidBody3D, spec: Dictionary) -> void:
-	if ResourceLoader.exists(spec.model):
-		var ps = load(spec.model)
-		if ps is PackedScene:
-			var inst = ps.instantiate()
-			body.add_child(inst)
-			return
-	var mi := MeshInstance3D.new()
-	if spec.get("cylinder",false):
-		var cm := CylinderMesh.new()
-		cm.top_radius = spec.size.x*0.5
-		cm.bottom_radius = spec.size.x*0.5
-		cm.height = spec.size.y
-		cm.radial_segments = 24
-		mi.mesh = cm
-	else:
-		var bm := BoxMesh.new()
-		bm.size = spec.size
-		mi.mesh = bm
-	var mat := StandardMaterial3D.new()
-	mat.albedo_color = color_for_kind(spec.id)
-	mat.roughness = 0.48
-	mi.material_override = mat
-	body.add_child(mi)
-
-func add_block_collision(body: RigidBody3D, spec: Dictionary) -> void:
-	var cs := CollisionShape3D.new()
-	if spec.get("cylinder",false):
-		var sh := CylinderShape3D.new()
-		sh.radius = spec.size.x*0.49
-		sh.height = spec.size.y*0.98
-		cs.shape = sh
-	else:
-		var sh := BoxShape3D.new()
-		sh.size = spec.size*0.97
-		cs.shape = sh
-	body.add_child(cs)
-
-func color_for_kind(kind: String) -> Color:
-	match kind:
-		"crate": return Color("#d79547")
-		"book": return Color("#5e8cff")
-		"brick": return Color("#e36754")
-		"plank": return Color("#b97a3e")
-		"can": return Color("#c5d2df")
-		"barrel": return Color("#d99a54")
-		_: return Color("#e9bd72")
-
-func drop_active() -> void:
-	if game_state != "running" or not active or not active.freeze: return
-	active.freeze = false
-	active.apply_torque_impulse(Vector3(rng.randf_range(-0.035,0.035),0,rng.randf_range(-0.035,0.035)))
-	status_label.text = "Giữ vững…"
-
-func shift_active(dx: float) -> void:
-	if active and active.freeze and game_state == "running":
-		manual_x = clamp(manual_x+dx,-1.25,1.25)
-
-func rotate_active(deg: float) -> void:
-	if active and active.freeze and game_state == "running":
-		active.rotate_y(deg_to_rad(deg))
-
-func accept_active() -> void:
-	if not active: return
-	var placement := placement_quality(active)
-	accepted.append(active)
-	var size: Vector3 = active.get_meta("size")
-	var top := active.position.y + size.y*0.5
-	var gained := max(0.0,top-height_m)
-	height_m = max(height_m,top)
-	var bonus := 0
-	if placement == "PERFECT":
-		combo += 1
-		bonus = 80 + combo*20
-		run_coins += 8 + int(skills[4]*1.5)
-		status_label.text = "PERFECT ×%d ✨" % combo
-	elif placement == "GOOD":
-		combo = 0
-		bonus = 35
-		run_coins += 4
-		status_label.text = "GOOD!"
-	else:
-		combo = 0
-		bonus = 10
-		run_coins += 2
-		status_label.text = "Ổn — lên tiếp!"
-	score += int(gained*120.0)+60+bonus
-	run_coins += int(gained*8.0)
-	active = null
-	update_ui()
-	get_tree().create_timer(0.34).timeout.connect(spawn_block)
-
-func placement_quality(body: RigidBody3D) -> String:
-	if accepted.is_empty(): return "GOOD"
-	var prev := accepted[-1]
-	var d := Vector2(body.position.x-prev.position.x,body.position.z-prev.position.z).length()
-	if d < 0.11 and body.rotation.length() < 0.18: return "PERFECT"
-	if d < 0.42: return "GOOD"
-	return "NORMAL"
-
-func handle_failure() -> void:
-	if safety_armed and mode == "casual" and active:
-		safety_armed = false
-		active.freeze = true
-		active.linear_velocity = Vector3.ZERO
-		active.angular_velocity = Vector3.ZERO
-		active.position = Vector3(0,max(height_m+4.8,5.2),0)
-		drop_age = 0.0
-		status_label.text = "Safety Platform đã cứu khối!"
-		update_ui()
-		return
-	game_state = "ended"
-	for b in gameplay_buttons: b.disabled = true
-	best_score = max(best_score,score)
-	best_height = max(best_height,height_m)
-	coins += run_coins
-	if mode == "ranked":
-		var rp_gain := clamp(int(score/240.0)-20,0,180)
-		rank_points += rp_gain
-	result_text.text = "Cao %.1f m\n%d điểm\n+%d coin\n%s" % [height_m,score,run_coins,current_rank()]
-	result_panel.visible = true
-	save_game()
-
-func rewarded_revive() -> void:
-	if mode == "ranked" or revive_used: return
-	revive_used = true
-	result_panel.visible = false
-	game_state = "running"
-	for b in gameplay_buttons: b.disabled = false
-	if active and is_instance_valid(active):
-		active.queue_free()
-		active = null
-	if not accepted.is_empty():
-		var b := accepted.pop_back()
-		if is_instance_valid(b): b.queue_free()
-	recalculate_height()
-	coins += 35
-	status_label.text = "Rewarded rescue demo: tiếp tục!"
-	spawn_block()
-	update_ui()
-
-func use_stabilizer() -> void:
-	if mode == "ranked" or game_state != "running": return
-	if rescue.stabilizer <= 0:
-		status_label.text = "Hết Stabilizer — mua trong Shop"
-		return
-	rescue.stabilizer -= 1
-	for b in accepted:
-		if is_instance_valid(b):
-			b.linear_velocity = Vector3.ZERO
-			b.angular_velocity = Vector3.ZERO
-			b.sleeping = true
-	status_label.text = "Stabilizer: tháp đã được khóa dao động"
-	save_game(); update_ui()
-
-func arm_safety() -> void:
-	if mode == "ranked" or game_state != "running": return
-	if safety_armed:
-		status_label.text = "Safety Platform đang sẵn sàng"
-		return
-	if rescue.safety <= 0:
-		status_label.text = "Hết Safety Platform — mua trong Shop"
-		return
-	rescue.safety -= 1
-	safety_armed = true
-	status_label.text = "Safety Platform đã kích hoạt cho lần rơi kế tiếp"
-	save_game(); update_ui()
-
-func use_undo() -> void:
-	if mode == "ranked" or game_state != "running" or accepted.is_empty(): return
-	if rescue.undo <= 0:
-		status_label.text = "Hết Undo Crane — mua trong Shop"
-		return
-	rescue.undo -= 1
-	var b := accepted.pop_back()
-	if is_instance_valid(b): b.queue_free()
-	score = max(0,score-50)
-	recalculate_height()
-	status_label.text = "Undo Crane: đã gỡ khối trên cùng"
-	save_game(); update_ui()
+func update_camera() -> void:
+	# Orthographic camera retains depth/shadows but gives an exact screen-space anchor.
+	# The actual highest collider point maps to 2/3 of viewport height from the top.
+	var view_size = get_viewport().get_visible_rect().size
+	var vertical_span = camera.size * view_size.y / view_size.x
+	var target = top_point + camera.global_basis.y * (vertical_span/6.0)
+	camera.position = target + camera.global_basis.z*24.0
+	world_decor.global_transform = camera.global_transform
 
 func recalculate_height() -> void:
 	height_m = 0.0
-	for b in accepted:
-		if is_instance_valid(b):
-			var s: Vector3 = b.get_meta("size")
-			height_m = max(height_m,b.position.y+s.y*0.5)
+	top_point = Vector3.ZERO
+	for body in accepted:
+		var point = Catalog.highest_point(body)
+		if point.y > height_m:
+			height_m = point.y
+			top_point = point
 
-func show_shop() -> void:
-	show_modal("SHOP")
-	add_modal_button("Stabilizer +1 · 250 coin",func(): buy_rescue("stabilizer",250))
-	add_modal_button("Safety Platform +1 · 400 coin",func(): buy_rescue("safety",400))
-	add_modal_button("Undo Crane +1 · 500 coin",func(): buy_rescue("undo",500))
-	add_modal_button("▶ Demo rewarded ad · +120 coin",func(): coins+=120; save_game(); update_ui(); status_label.text="Đã nhận 120 coin (demo ad)")
-	add_modal_button("Coin Pack 3,000 · DEMO IAP",func(): coins+=3000; save_game(); update_ui())
+func make_block(index: int) -> RigidBody3D:
+	var spec = Catalog.BLOCKS[index]
+	var body = RigidBody3D.new()
+	body.set_meta("spec",spec)
+	body.mass = spec.mass
+	body.continuous_cd = true
+	body.contact_monitor = true
+	body.max_contacts_reported = 16
+	body.linear_damp = 0.18
+	body.angular_damp = 0.35
+	body.freeze = true
+	body.freeze_mode = RigidBody3D.FREEZE_MODE_STATIC
+	var wooden = spec.id in ["crate","plank","chair","barrel"]
+	var pm = PhysicsMaterial.new()
+	pm.friction = 0.78
+	pm.bounce = 0.015
+	if mode == "casual" and wooden:
+		pm.friction += skills[0]*0.06
+		body.linear_damp += skills[1]*0.045
+		body.angular_damp += skills[1]*0.09
+		body.mass *= 1.0-skills[3]*0.05
+		body.center_of_mass_mode = RigidBody3D.CENTER_OF_MASS_MODE_CUSTOM
+		body.center_of_mass = Vector3(0,-minf(spec.size.y*0.2,skills[2]*0.025),0)
+	body.physics_material_override = pm
+	Catalog.add_colliders(body,spec)
+	var path = "res://assets/models/%s.glb" % spec.id
+	if ResourceLoader.exists(path):
+		body.add_child(load(path).instantiate())
+	else:
+		for collider in body.get_children():
+			var mesh: Mesh
+			if collider.shape is BoxShape3D:
+				mesh = BoxMesh.new()
+				mesh.size = collider.shape.size
+			else:
+				mesh = CylinderMesh.new()
+				mesh.top_radius = collider.shape.radius
+				mesh.bottom_radius = collider.shape.radius
+				mesh.height = collider.shape.height
+			mesh_node(mesh,collider.position,material(Color.from_hsv(index/13.0,0.55,0.95)),body)
+	body.body_entered.connect(func(_other):
+		if impact_cooldown <= 0 and not body.freeze:
+			audio.play("metal" if spec.id in ["can","ufo"] else "wood",rng.randf_range(0.92,1.08))
+			impact_cooldown = 0.1)
+	add_child(body)
+	return body
 
-func buy_rescue(key: String, cost: int) -> void:
-	if coins < cost:
-		status_label.text = "Không đủ coin"
-		return
-	coins -= cost
-	rescue[key] += 1
-	save_game(); update_ui(); show_shop()
+func spawn_block() -> void:
+	if state != "running" or is_instance_valid(active): return
+	active = make_block(next_index)
+	next_index = rng.randi_range(0,Catalog.BLOCKS.size()-1)
+	manual_x = top_point.x*0.5
+	manual_z = top_point.z*0.5
+	active.position = Vector3(manual_x,height_m+3.5,manual_z)
+	drop_age = 0
+	settle_time = 0
+	update_camera()
 
-func show_skills() -> void:
-	show_modal("WOOD SKILLS")
-	for i in range(SKILL_NAMES.size()):
-		var lv := skills[i]
-		var cost := SKILL_COSTS[min(lv,SKILL_COSTS.size()-1)]
-		var text := "%s · Lv%d/5" % [SKILL_NAMES[i],lv]
-		if lv < 5: text += " · %d coin" % cost
-		else: text += " · MAX"
-		add_modal_button(text,func(idx=i): upgrade_skill(idx))
+func update_ghost() -> void:
+	var query = PhysicsRayQueryParameters3D.create(active.position,active.position-Vector3(0,1000,0))
+	query.exclude = [active.get_rid()]
+	var hit = get_world_3d().direct_space_state.intersect_ray(query)
+	ghost.visible = not hit.is_empty()
+	if ghost.visible: ghost.position = hit.position+Vector3(0,0.025,0)
 
-func upgrade_skill(i: int) -> void:
-	if skills[i] >= 5: return
-	var cost := SKILL_COSTS[skills[i]]
-	if coins < cost:
-		status_label.text = "Không đủ coin để nâng skill"
-		return
-	coins -= cost
-	skills[i] += 1
-	save_game(); update_ui(); show_skills()
+func drop_active() -> void:
+	if modal.visible or state != "running" or not is_instance_valid(active) or not active.freeze: return
+	drop_origin = active.position
+	active.freeze = false
+	active.sleeping = false
+	ghost.visible = false
+	audio.play("drop")
+	message("Đang rơi…","Dropping…")
 
-func show_rank() -> void:
-	show_modal("RANKED · %s" % current_rank())
-	var names := ["Linh · Rival","An · Rival","Minh · Rival","Khoa · Rival","Vy · Rival"]
-	for i in range(5):
-		var l := Label.new()
-		l.text = "%d. %s   %d RP" % [i+1,names[i],max(0,rank_points+180-i*95)]
-		l.add_theme_font_size_override("font_size",20)
-		modal_body.add_child(l)
-	var you := Label.new()
-	you.text = "YOU · %d RP" % rank_points
-	you.add_theme_font_size_override("font_size",23)
-	modal_body.add_child(you)
+func rotate_active(degrees: float) -> void:
+	if modal.visible or state != "running" or not is_instance_valid(active) or not active.freeze: return
+	active.rotate_y(deg_to_rad(degrees))
 
-func show_modal(title_text: String) -> void:
-	for c in modal_body.get_children(): c.queue_free()
-	modal_title.text = title_text
-	modal.visible = true
+func accept_active() -> void:
+	var previous = top_point
+	var body = active
+	accepted.append(body)
+	active = null
+	recalculate_height()
+	var gain = maxf(0.0,height_m-height_record)
+	height_record = maxf(height_record,height_m)
+	var tilt = acos(clampf(body.global_basis.y.dot(Vector3.UP),-1,1))
+	var distance = Vector2(body.position.x-previous.x,body.position.z-previous.z).length()
+	var perfect = distance < 0.18 and tilt < 0.12 and gain > 0.1
+	combo = combo+1 if perfect else 0
+	score += int(gain*120)+60+(80+combo*20 if perfect else 20)
+	run_coins += int(gain*8)+ (8+skills[4]*2 if perfect and mode == "casual" else 4)
+	if perfect:
+		audio.play("perfect",1.0+minf(combo*0.03,0.3))
+		message("HOÀN HẢO ×%d" % combo,"PERFECT ×%d" % combo)
+		if settings.vibration: Input.vibrate_handheld(35)
+	else:
+		message("Vững rồi — lên tiếp!","Steady — keep going!")
+	spawn_wait = 0.35
 
-func add_modal_button(text_value: String, cb: Callable) -> void:
-	var b := Button.new()
-	b.text = text_value
-	b.custom_minimum_size.y = 58
-	b.add_theme_font_size_override("font_size",18)
-	b.pressed.connect(cb)
-	modal_body.add_child(b)
+func finish_run(collapsed: bool) -> void:
+	if state != "running": return
+	state = "ended"
+	arena.running = false
+	ghost.visible = false
+	bank_coins()
+	best_height = maxf(best_height,height_record)
+	best_score = maxi(best_score,score)
+	var won = mode == "arena" and not collapsed and score > arena.opponent_score
+	if mode == "ranked": rank_points += mini(180,score/30)
+	if won: coins += 100
+	save_game()
+	audio.play("win" if won else "lose")
+	show_modal(t("Kết quả","Results"))
+	note(t("Chiều cao: %.1f m\nĐiểm: %d\nCoin kiếm được: %d","Height: %.1f m\nScore: %d\nCoins earned: %d") % [height_record,score,run_coins])
+	if mode == "arena":
+		var result = t("THẮNG +100 coin","WIN +100 coins") if won else t("THUA","LOSS")
+		if not collapsed and score == arena.opponent_score: result = t("HÒA","DRAW")
+		note("BOT: %d\n%s" % [arena.opponent_score,result])
+	button(modal_body,t("Chơi lại","Play again"),restart_run)
+	button(modal_body,t("Chơi tự do","Play casual"),func(): mode="casual"; restart_run())
 
-func toggle_mode() -> void:
-	mode = "ranked" if mode == "casual" else "casual"
-	status_label.text = "RANKED: boost/item/ad revive bị tắt" if mode == "ranked" else "CASUAL: skills & rescue hoạt động"
-	restart_run()
+func bank_coins() -> void:
+	coins += maxi(0,run_coins-paid_coins)
+	paid_coins = run_coins
 
 func restart_run() -> void:
-	result_panel.visible = false
-	modal.visible = false
-	for b in gameplay_buttons: b.disabled = false
-	if active and is_instance_valid(active): active.queue_free()
+	bank_coins()
+	close_modal()
+	if is_instance_valid(active):
+		remove_child(active)
+		active.queue_free()
 	active = null
-	for b in accepted:
-		if is_instance_valid(b): b.queue_free()
+	for body in accepted:
+		remove_child(body)
+		body.queue_free()
 	accepted.clear()
-	height_m = 0.0
+	height_m = 0
+	height_record = 0
+	top_point = Vector3.ZERO
 	score = 0
 	run_coins = 0
+	paid_coins = 0
 	combo = 0
-	revive_used = false
 	safety_armed = false
-	game_state = "running"
-	camera.position = Vector3(7.2,6.2,9.3)
-	spawn_block(); update_ui()
+	spawn_wait = 0
+	state = "running"
+	if mode == "arena":
+		var seed_number = rng.randi()
+		arena.start(seed_number,difficulty)
+		rng.seed = seed_number
+	else: arena.running = false
+	next_index = 0
+	spawn_block()
+	update_ui()
+	save_game()
+
+func use_stabilizer() -> void:
+	if not can_use_item("stabilizer") or accepted.is_empty(): return
+	rescue.stabilizer -= 1
+	for body in accepted:
+		body.linear_velocity *= 0.05
+		body.angular_velocity *= 0.05
+		body.sleeping = true
+	audio.play("rescue")
+	save_game()
+
+func arm_safety() -> void:
+	if not can_use_item("safety") or safety_armed: return
+	rescue.safety -= 1
+	safety_armed = true
+	audio.play("rescue")
+	save_game()
+
+func use_undo() -> void:
+	if not can_use_item("undo") or accepted.is_empty(): return
+	if is_instance_valid(active) and not active.freeze: return
+	rescue.undo -= 1
+	var body = accepted.pop_back()
+	remove_child(body)
+	body.queue_free()
+	recalculate_height()
+	combo = 0
+	audio.play("rescue")
+	save_game()
+
+func can_use_item(key: String) -> bool:
+	if modal.visible or mode != "casual" or state != "running": return false
+	if rescue[key] <= 0:
+		message("Hết vật phẩm — ghé Cửa hàng","Out of items — visit Store")
+		return false
+	return true
+
+func show_store() -> void:
+	bank_coins()
+	show_modal(t("CỬA HÀNG","STORE"))
+	note(t("Số dư: %d coin • Chỉ dùng tiền trong game","Balance: %d coins • In-game currency only") % coins)
+	for item in [["stabilizer",250,t("Giữ vững","Stabilizer")],["safety",400,t("Cứu rơi","Safety")],["undo",500,t("Gỡ khối","Undo")]]:
+		var node = button(modal_body,"%s ×1  •  %d" % [item[2],item[1]],func(): buy_item(item[0],item[1]))
+		node.disabled = coins < item[1]
+	for item in [["day",0,t("Bầu trời ban ngày","Day sky")],["sunset",650,t("Hoàng hôn","Sunset")],["night",900,t("Đêm cực quang","Aurora night")]]:
+		var owned = item[0] in owned_themes
+		var text = "%s • %s" % [item[2],t("Đã sở hữu","Owned") if owned else str(item[1])+" coin"]
+		var node = button(modal_body,text,func(): buy_theme(item[0],item[1]))
+		node.disabled = not owned and coins < item[1]
+	note(t("Coin nhận khi xếp tháp; thắng Arena được thưởng 100 coin. Vật phẩm và kỹ năng chỉ áp dụng trong Chơi tự do.","Earn coins by stacking; win Arena for 100 coins. Items and skills apply only in Casual."))
+
+func buy_item(key: String, cost: int) -> void:
+	var prices = {"stabilizer":250,"safety":400,"undo":500}
+	if not prices.has(key) or cost != prices[key] or coins < cost: return
+	coins -= cost
+	rescue[key] += 1
+	audio.play("coin")
+	save_game()
+	show_store()
+
+func buy_theme(key: String, cost: int) -> void:
+	var prices = {"day":0,"sunset":650,"night":900}
+	if not prices.has(key) or prices[key] != cost: return
+	if not key in owned_themes:
+		if coins < cost: return
+		coins -= cost
+		owned_themes.append(key)
+	selected_theme = key
+	apply_theme()
+	save_game()
+	show_store()
+
+func apply_theme() -> void:
+	var sky_mat = environment.sky.sky_material
+	match selected_theme:
+		"sunset":
+			sky_mat.sky_top_color = Color("78579d")
+			sky_mat.sky_horizon_color = Color("ffbe96")
+		"night":
+			sky_mat.sky_top_color = Color("111c48")
+			sky_mat.sky_horizon_color = Color("3ca7a9")
+		_:
+			sky_mat.sky_top_color = Color("428fdd")
+			sky_mat.sky_horizon_color = Color("f7dbb6")
+	sky_mat.ground_horizon_color = sky_mat.sky_horizon_color
+
+func show_skills() -> void:
+	show_modal(t("KỸ NĂNG GỖ","WOOD SKILLS"))
+	note(t("Chỉ áp dụng cho khối gỗ trong Chơi tự do.","Applies to wooden blocks in Casual only."))
+	for i in range(skills.size()):
+		var level = int(skills[i])
+		var text = "%s  %d/5" % [t(SKILL_NAMES[i][0],SKILL_NAMES[i][1]),level]
+		if level < 5: text += " • %d coin" % COSTS[level]
+		var node = button(modal_body,text,func(): upgrade_skill(i))
+		node.disabled = level >= 5 or coins < COSTS[mini(level,4)]
+
+func upgrade_skill(index: int) -> void:
+	var level = int(skills[index])
+	if level >= 5 or coins < COSTS[level]: return
+	coins -= COSTS[level]
+	skills[index] += 1
+	save_game()
+	show_skills()
+
+func show_settings() -> void:
+	show_modal(t("CÀI ĐẶT","SETTINGS"))
+	for pair in [["music",t("Nhạc nền","Music")],["sfx",t("Hiệu ứng âm thanh","Sound effects")]]:
+		note(pair[1])
+		var slider = HSlider.new()
+		slider.min_value = 0
+		slider.max_value = 1
+		slider.step = 0.05
+		slider.value = settings[pair[0]]
+		slider.custom_minimum_size.y = 48
+		slider.value_changed.connect(func(value): settings[pair[0]]=value; audio.apply_settings(settings); save_game())
+		modal_body.add_child(slider)
+	button(modal_body,"Ngôn ngữ / Language: "+("Tiếng Việt" if settings.language == "vi" else "English"),func():
+		settings.language = "en" if settings.language == "vi" else "vi"
+		save_game()
+		build_ui()
+		show_settings())
+	for pair in [["shadows",t("Bóng đổ","Shadows")],["vibration",t("Rung","Vibration")],["motion",t("Chuyển động trang trí","Decorative motion")]]:
+		var check = CheckButton.new()
+		check.text = pair[1]
+		check.button_pressed = settings[pair[0]]
+		check.custom_minimum_size.y = 58
+		check.toggled.connect(func(value): settings[pair[0]]=value; sun.shadow_enabled=settings.shadows; save_game())
+		modal_body.add_child(check)
+	note(t("Game tạm dừng khi mở menu. Kéo trên vùng chơi để di chuyển theo hai chiều; xoay bằng hai nút dưới cùng.","Menus pause the game. Drag in the play area to move in two directions; rotate with the bottom buttons."))
+
+func show_arena() -> void:
+	show_modal("ARENA")
+	note(t("Đấu BOT • 90 giây • Điểm cao hơn thắng\nTháp đổ là thua ngay. Không dùng vật phẩm/kỹ năng.","BOT match • 90 seconds • Highest score wins\nA collapsed tower loses immediately. No items or skills."))
+	for i in range(3):
+		var names = [t("Dễ","Easy"),t("Vừa","Normal"),t("Khó","Hard")]
+		button(modal_body,"BOT • "+names[i],func(): difficulty=i; mode="arena"; restart_run())
+	var human = button(modal_body,t("Người thật • Chưa có máy chủ","Human match • Server not configured"),func(): pass)
+	human.disabled = true
+	note(t("BOT là đối thủ mô phỏng, không phải người thật. Đã có giao diện phiên đấu để tích hợp máy chủ sau.","BOT is a simulated opponent, not a human. A session interface is ready for future server integration."))
+
+func show_modes() -> void:
+	show_modal(t("CHẾ ĐỘ CHƠI","GAME MODE"))
+	note(t("Kỷ lục: %.1f m • %d điểm\nRank nội bộ: %d RP","Best: %.1f m • %d points\nLocal rank: %d RP") % [best_height,best_score,rank_points])
+	button(modal_body,t("Chơi tự do • Có kỹ năng và vật phẩm","Casual • Skills and items enabled"),func(): mode="casual"; restart_run())
+	button(modal_body,t("Rank nội bộ • Vật lý công bằng","Local ranked • Equal physics"),func(): mode="ranked"; restart_run())
+	button(modal_body,"Arena",show_arena)
+	button(modal_body,t("Chơi lại lượt hiện tại","Restart current run"),restart_run)
 
 func update_ui() -> void:
-	if not height_label: return
-	height_label.text = "%.1f m" % height_m
-	score_label.text = "%d pts" % score
-	coin_label.text = "🪙 %d" % coins
-	rank_label.text = "%s%s" % [current_rank()," · R" if mode == "ranked" else ""]
-	item_label.text = "🧲 %d   🛟 %d%s   🏗 %d" % [rescue.stabilizer,rescue.safety," ✓" if safety_armed else "",rescue.undo]
-
-func current_rank() -> String:
-	var name := "Bronze"
-	for r in RANKS:
-		if rank_points >= int(r[0]): name = str(r[1])
-	return name
+	if not is_instance_valid(hud): return
+	hud.text = "%.1f m    •    %d pts    •    %d coin" % [height_m,score,coins+maxi(0,run_coins-paid_coins)]
+	inventory.text = t("Giữ vững %d   •   Cứu rơi %d%s   •   Gỡ khối %d","Stabilize %d   •   Safety %d%s   •   Undo %d") % [rescue.stabilizer,rescue.safety," ✓" if safety_armed else "",rescue.undo]
+	if mode != "casual": inventory.text = t("Vật lý công bằng • Không dùng vật phẩm","Equal physics • Items disabled")
+	arena_hud.text = "BOT • %d pts • %.1f m    |    %ds" % [arena.opponent_score,arena.opponent_height,ceili(arena.remaining)] if mode == "arena" else (t("CHƠI TỰ DO","CASUAL") if mode == "casual" else t("RANK NỘI BỘ","LOCAL RANKED"))
+	if status_time <= 0 and is_instance_valid(active):
+		var spec = active.get_meta("spec")
+		var next = Catalog.BLOCKS[next_index]
+		status.text = "%s • %s: %s" % [spec[settings.language],t("Tiếp","Next"),next[settings.language]]
 
 func load_save() -> void:
-	var cfg := ConfigFile.new()
-	if cfg.load("user://highstack.cfg") == OK:
-		coins = int(cfg.get_value("player","coins",900))
-		rank_points = int(cfg.get_value("player","rank_points",0))
-		best_score = int(cfg.get_value("player","best_score",0))
-		best_height = float(cfg.get_value("player","best_height",0.0))
-		skills = cfg.get_value("player","skills",[0,0,0,0,0])
-		rescue = cfg.get_value("player","rescue",{"stabilizer":1,"safety":1,"undo":1})
+	var config = ConfigFile.new()
+	if config.load(save_path) != OK: return
+	coins = maxi(0,int(config.get_value("player","coins",900)))
+	best_score = maxi(0,int(config.get_value("player","best_score",0)))
+	best_height = maxf(0,float(config.get_value("player","best_height",0)))
+	rank_points = maxi(0,int(config.get_value("player","rank_points",0)))
+	var saved_skills = config.get_value("player","skills",skills)
+	if saved_skills is Array and saved_skills.size() == 5:
+		for i in range(5): skills[i] = clampi(int(saved_skills[i]),0,5)
+	var saved_rescue = config.get_value("player","rescue",rescue)
+	if saved_rescue is Dictionary:
+		for key in rescue: rescue[key] = maxi(0,int(saved_rescue.get(key,1)))
+	for key in settings:
+		var value = config.get_value("settings",key,settings[key])
+		if typeof(value) == typeof(settings[key]): settings[key] = value
+	settings.music = clampf(settings.music,0,1)
+	settings.sfx = clampf(settings.sfx,0,1)
+	if settings.language not in ["vi","en"]: settings.language = "vi"
+	var saved_themes = config.get_value("player","themes",["day"])
+	if saved_themes is Array:
+		for key in ["sunset","night"]:
+			if key in saved_themes: owned_themes.append(key)
+	var saved_theme = config.get_value("player","theme","day")
+	if saved_theme in owned_themes: selected_theme = saved_theme
 
 func save_game() -> void:
-	var cfg := ConfigFile.new()
-	cfg.set_value("player","coins",coins)
-	cfg.set_value("player","rank_points",rank_points)
-	cfg.set_value("player","best_score",best_score)
-	cfg.set_value("player","best_height",best_height)
-	cfg.set_value("player","skills",skills)
-	cfg.set_value("player","rescue",rescue)
-	cfg.save("user://highstack.cfg")
+	var config = ConfigFile.new()
+	for pair in [["coins",coins],["best_score",best_score],["best_height",best_height],["rank_points",rank_points],["skills",skills],["rescue",rescue],["themes",owned_themes],["theme",selected_theme]]:
+		config.set_value("player",pair[0],pair[1])
+	for key in settings: config.set_value("settings",key,settings[key])
+	var error = config.save(save_path+".tmp")
+	if error == OK:
+		error = DirAccess.rename_absolute(save_path+".tmp",save_path)
+	if error != OK: push_warning("Could not persist game: %s" % error)
+
+func run_smoke() -> void:
+	var suite = preload("res://scripts/smoke_suite.gd").new()
+	await suite.run(self)
+
+func capture_preview() -> void:
+	set_physics_process(false)
+	if is_instance_valid(active):
+		remove_child(active)
+		active.queue_free()
+	active = null
+	var y = 0.0
+	for index in [0,1,6,10,2]:
+		var body = make_block(index)
+		body.position.y = y+body.get_meta("spec").size.y*0.5
+		y += body.get_meta("spec").size.y
+		accepted.append(body)
+	recalculate_height()
+	spawn_block()
+	active.position = Vector3(0,height_m+3.2,0)
+	update_camera()
+	update_ui()
+	await get_tree().process_frame
+	await RenderingServer.frame_post_draw
+	await RenderingServer.frame_post_draw
+	get_viewport().get_texture().get_image().save_png("res://../build/gameplay.png")
+	show_store()
+	await get_tree().process_frame
+	await RenderingServer.frame_post_draw
+	get_viewport().get_texture().get_image().save_png("res://../build/store.png")
+	show_settings()
+	await get_tree().process_frame
+	await RenderingServer.frame_post_draw
+	get_viewport().get_texture().get_image().save_png("res://../build/settings.png")
+	show_arena()
+	await get_tree().process_frame
+	await RenderingServer.frame_post_draw
+	get_viewport().get_texture().get_image().save_png("res://../build/arena.png")
+	get_tree().quit()
