@@ -102,20 +102,10 @@ jobs:
           profile: pixel_2
           disable-animations: true
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
-          script: |
-            adb install build/HighStack3D-v0.3.0.apk
-            adb logcat -c
-            adb shell monkey -p com.highstackstudio.highstack3d 1
-            sleep 8
-            adb shell pidof com.highstackstudio.highstack3d
-            adb shell input tap 540 1740
-            sleep 5
-            adb shell pidof com.highstackstudio.highstack3d
-            adb exec-out screencap -p > build/android-gameplay.png
-            adb logcat -d > build/android-logcat.txt
-            ! grep -E 'FATAL EXCEPTION|SCRIPT ERROR|Parse Error' build/android-logcat.txt
+          script: bash tools/android_smoke.sh
 
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: HighStack3D-3D-APK
           path: |
