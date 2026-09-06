@@ -36,6 +36,37 @@ jobs:
           ./blender/blender -b --python tools/blender_assets.py
           ls -lh game/assets/models
 
+      - name: Apply Godot 4.7 strict-typing and Android export fixes
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('game/scripts/main.gd')
+          s = p.read_text()
+          fixes = {
+              'var target_y := max(2.7,height_m+1.75)': 'var target_y: float = maxf(2.7,height_m+1.75)',
+              'var gained := max(0.0,top-height_m)': 'var gained: float = maxf(0.0,top-height_m)',
+              'var rp_gain := clamp(int(score/240.0)-20,0,180)': 'var rp_gain: int = clampi(int(score/240.0)-20,0,180)',
+              'var b := accepted.pop_back()': 'var b: RigidBody3D = accepted.pop_back() as RigidBody3D',
+              'var lv := skills[i]': 'var lv: int = int(skills[i])',
+              'var cost := SKILL_COSTS[min(lv,SKILL_COSTS.size()-1)]': 'var cost: int = int(SKILL_COSTS[mini(lv,SKILL_COSTS.size()-1)])',
+              'var cost := SKILL_COSTS[skills[i]]': 'var cost: int = int(SKILL_COSTS[int(skills[i])])',
+          }
+          for a,b in fixes.items():
+              s = s.replace(a,b)
+          p.write_text(s)
+
+          p = Path('game/project.godot')
+          s = p.read_text()
+          if 'textures/vram_compression/import_etc2_astc=true' not in s:
+              s = s.replace('textures/default_filters/use_nearest_mipmap_filter=false', 'textures/default_filters/use_nearest_mipmap_filter=false\ntextures/vram_compression/import_etc2_astc=true')
+          p.write_text(s)
+
+          p = Path('game/export_presets.cfg')
+          s = p.read_text()
+          s = '\n'.join(line for line in s.splitlines() if not line.startswith('gradle_build/min_sdk=') and not line.startswith('gradle_build/target_sdk=')) + '\n'
+          p.write_text(s)
+          PY
+
       - name: Download Godot 4.7.2 and Android templates
         run: |
           curl -L --retry 3 -o godot.zip https://github.com/godotengine/godot/releases/download/4.7.2-stable/Godot_v4.7.2-stable_linux.x86_64.zip
@@ -52,12 +83,16 @@ jobs:
         run: |
           keytool -genkeypair -v -keystore "$RUNNER_TEMP/highstack-debug.keystore" -storepass android -alias androiddebugkey -keypass android -dname "CN=HighStack Debug,O=HighStack Studio,C=VN" -keyalg RSA -keysize 2048 -validity 10000
 
-      - name: Import project assets
+      - name: Import project assets and validate scripts
         env:
           ANDROID_HOME: ${{ env.ANDROID_HOME }}
           ANDROID_SDK_ROOT: ${{ env.ANDROID_SDK_ROOT }}
         run: |
           godot --headless --editor --path game --quit
+
+      - name: Runtime smoke test
+        run: |
+          godot --headless --path game --quit-after 60
 
       - name: Export signed debug APK
         env:
