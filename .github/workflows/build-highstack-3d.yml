@@ -36,6 +36,9 @@ jobs:
           ./blender/blender -b --python tools/blender_assets.py
           ls -lh game/assets/models
 
+      - name: Generate original music and sound effects
+        run: python3 tools/audio_assets.py
+
       - name: Download Godot 4.7.2 and Android templates
         run: |
           curl -L --retry 3 -o godot.zip https://github.com/godotengine/godot/releases/download/4.7.2-stable/Godot_v4.7.2-stable_linux.x86_64.zip
@@ -52,12 +55,19 @@ jobs:
         run: |
           keytool -genkeypair -v -keystore "$RUNNER_TEMP/highstack-debug.keystore" -storepass android -alias androiddebugkey -keypass android -dname "CN=HighStack Debug,O=HighStack Studio,C=VN" -keyalg RSA -keysize 2048 -validity 10000
 
-      - name: Import project assets
+      - name: Import project assets and validate scripts
         env:
           ANDROID_HOME: ${{ env.ANDROID_HOME }}
           ANDROID_SDK_ROOT: ${{ env.ANDROID_SDK_ROOT }}
         run: |
           godot --headless --editor --path game --quit
+
+      - name: Runtime smoke test
+        run: |
+          mkdir -p build
+          timeout 120 godot --headless --path game -- --smoke 2>&1 | tee build/smoke.log
+          grep -q "HIGHSTACK_SMOKE: .*checks, 0 failures" build/smoke.log
+          ! grep -E "SCRIPT ERROR|^ERROR:" build/smoke.log
 
       - name: Export signed debug APK
         env:
@@ -68,19 +78,41 @@ jobs:
           ANDROID_SDK_ROOT: ${{ env.ANDROID_SDK_ROOT }}
         run: |
           mkdir -p build
-          godot --headless --path game --export-debug Android "$PWD/build/HighStack3D-3D-v0.2.apk"
+          godot --headless --path game --export-debug Android "$PWD/build/HighStack3D-v0.3.0.apk"
 
       - name: Verify APK
         run: |
-          test -s build/HighStack3D-3D-v0.2.apk
-          unzip -t build/HighStack3D-3D-v0.2.apk >/dev/null
-          sha256sum build/HighStack3D-3D-v0.2.apk | tee build/HighStack3D-3D-v0.2.sha256
-          du -h build/HighStack3D-3D-v0.2.apk
+          test -s build/HighStack3D-v0.3.0.apk
+          unzip -t build/HighStack3D-v0.3.0.apk >/dev/null
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose build/HighStack3D-v0.3.0.apk | tee build/signature.txt
+          sha256sum build/HighStack3D-v0.3.0.apk | tee build/HighStack3D-v0.3.0.sha256
+          du -h build/HighStack3D-v0.3.0.apk
+
+      - name: Enable KVM for Android smoke test
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Install and launch APK on Android emulator
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          arch: x86_64
+          profile: pixel_2
+          disable-animations: true
+          emulator-options: -no-window -gpu swangle -noaudio -no-boot-anim -camera-back none
+          script: bash tools/android_smoke.sh
 
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: HighStack3D-3D-APK
           path: |
-            build/HighStack3D-3D-v0.2.apk
-            build/HighStack3D-3D-v0.2.sha256
+            build/HighStack3D-v0.3.0.apk
+            build/HighStack3D-v0.3.0.sha256
+            build/smoke.log
+            build/signature.txt
+            build/android-gameplay.png
+            build/android-logcat.txt
           if-no-files-found: error
