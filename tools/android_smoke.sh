@@ -3,13 +3,13 @@ set -euo pipefail
 package=com.highstackstudio.highstack3d
 collect() {
   adb logcat -d > build/android-logcat.txt || true
-  adb exec-out screencap -p > build/android-gameplay.png || true
+  adb exec-out screencap -p > build/android-last-screen.png || true
   if [ "${1:-0}" != 0 ]; then
     tail -n 180 build/android-logcat.txt
   fi
 }
 trap 'collect $?' EXIT
-adb install --no-incremental build/HighStack3D-v0.3.0.apk
+adb install --no-incremental build/HighStack3D-v0.4.0.apk
 adb shell settings put secure immersive_mode_confirmations confirmed
 adb logcat -c
 activity=$(adb shell cmd package resolve-activity --brief "$package" | tr -d '\r' | tail -n 1)
@@ -17,9 +17,20 @@ adb shell am start -W -n "$activity"
 sleep 15
 adb shell pidof "$package"
 adb shell input tap 540 1740
-sleep 5
+sleep 12
 adb shell pidof "$package"
 collect 0
+adb exec-out screencap -p > build/android-gameplay.png
+# Open Ranking, then Ads, retaining screenshots of both native APK screens.
+adb shell input tap 105 548
+sleep 3
+adb exec-out screencap -p > build/android-ranking.png
+adb shell input tap 540 1710
+sleep 2
+adb shell input tap 105 1050
+sleep 15
+adb exec-out screencap -p > build/android-ads.png
+adb logcat -d > build/android-logcat.txt
 if grep -E 'FATAL EXCEPTION|SCRIPT ERROR|Parse Error|Fatal signal|E godot.*ERROR:' build/android-logcat.txt; then
   exit 1
 fi

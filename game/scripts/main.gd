@@ -2,7 +2,8 @@ extends Node3D
 
 const Catalog = preload("res://scripts/catalog.gd")
 const Sound = preload("res://scripts/audio.gd")
-const Arena = preload("res://scripts/arena_session.gd")
+const Ranking = preload("res://scripts/ranking.gd")
+const Ads = preload("res://scripts/ads.gd")
 const SAVE_PATH = "user://highstack.cfg"
 const SKILL_NAMES = [["Bám chắc","Grip"],["Giảm chấn","Shock absorber"],["Cân bằng","Balanced core"],["Gỗ nhẹ","Light wood"],["Thưởng Perfect","Perfect bonus"]]
 const COSTS = [500,1200,2500,5000,8000]
@@ -21,7 +22,15 @@ var camera: Camera3D
 var sun: DirectionalLight3D
 var environment: Environment
 var audio: Node
-var arena = Arena.new()
+var ads: Node
+var coin_label: Label
+var score_label: Label
+var item_buttons: Dictionary = {}
+var model_cache: Dictionary = {}
+var camera_height = 0.0
+var camera_goal = 0.0
+var ads_status_label: Label
+var watch_ad_button: Button
 var active: RigidBody3D
 var accepted: Array[RigidBody3D] = []
 var ghost: MeshInstance3D
@@ -56,7 +65,6 @@ var top_point = Vector3.ZERO
 var next_index = 0
 var drop_origin = Vector3.ZERO
 var impact_cooldown = 0.0
-var difficulty = 1
 var test_mode = false
 var preview_count = 0
 
@@ -68,12 +76,18 @@ func _ready() -> void:
 	if test_mode: save_path = "user://highstack-smoke.cfg"
 	load_save()
 	rng.randomize()
+	for spec in Catalog.BLOCKS:
+		var path = "res://assets/models/%s.glb" % spec.id
+		if ResourceLoader.exists(path): model_cache[spec.id] = load(path)
 	audio = Sound.new()
 	add_child(audio)
 	audio.apply_settings(settings)
 	build_world()
 	build_ui()
-	arena.match_finished.connect(func(): finish_run(false))
+	ads = Ads.new()
+	ads.earned.connect(on_ad_reward)
+	ads.changed.connect(refresh_ad_menu)
+	add_child(ads)
 	restart_run()
 	if test_mode: call_deferred("run_smoke")
 	if "--capture" in OS.get_cmdline_user_args(): call_deferred("capture_preview")
@@ -222,7 +236,11 @@ func build_ui() -> void:
 	ui.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	layer.add_child(ui)
 	var theme = Theme.new()
-	theme.default_font_size = 22
+	var game_font = FontVariation.new()
+	game_font.base_font = load("res://assets/fonts/Baloo2.ttf")
+	game_font.variation_opentype = {"wght":650}
+	theme.default_font = game_font
+	theme.default_font_size = 23
 	theme.set_stylebox("normal","Button",style(Color("17354f")))
 	theme.set_stylebox("hover","Button",style(Color("245773")))
 	theme.set_stylebox("pressed","Button",style(Color("158f99")))
@@ -246,20 +264,17 @@ func build_ui() -> void:
 	var logo = label("HIGHSTACK",28)
 	logo.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	header.add_child(logo)
-	button(header,t("Cài đặt","Settings"),show_settings)
+	logo.text = "HIGHSTACK 3D"
+	logo.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	logo.add_theme_font_size_override("font_size",44)
 	var panel = PanelContainer.new()
 	root_column.add_child(panel)
-	hud = label("",24)
-	hud.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	panel.add_child(hud)
-	var nav = HBoxContainer.new()
-	nav.add_theme_constant_override("separation",10)
-	root_column.add_child(nav)
-	button(nav,t("Cửa hàng","Store"),show_store)
-	button(nav,"Arena",show_arena)
-	button(nav,t("Kỹ năng","Skills"),show_skills)
-	button(nav,t("Chế độ","Mode"),show_modes)
-	arena_hud = label("",20)
+	var stats = HBoxContainer.new()
+	panel.add_child(stats)
+	hud = stat_pill(stats,"height")
+	score_label = stat_pill(stats,"star")
+	coin_label = stat_pill(stats,"coin")
+	arena_hud = label("",19)
 	arena_hud.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	root_column.add_child(arena_hud)
 	status = label("",22)
@@ -275,12 +290,19 @@ func build_ui() -> void:
 	inventory.add_theme_color_override("font_color",Color("102b43"))
 	inventory.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	root_column.add_child(inventory)
-	var items = HBoxContainer.new()
-	items.add_theme_constant_override("separation",8)
-	root_column.add_child(items)
-	button(items,t("Giữ vững","Stabilize"),use_stabilizer)
-	button(items,t("Cứu rơi","Safety"),arm_safety)
-	button(items,t("Gỡ khối","Undo"),use_undo)
+	# Two side rails keep menus and boosters away from the center of play.
+	item_buttons.clear()
+	var left = side_rail(false)
+	var right = side_rail(true)
+	side_button(left,"store",t("Cửa hàng","Store"),show_store)
+	side_button(left,"ranking","Ranking",show_ranking)
+	side_button(left,"skills",t("Kỹ năng","Skills"),show_skills)
+	side_button(left,"mode",t("Chế độ","Mode"),show_modes)
+	side_button(left,"ads",t("Nhận coin","Free coins"),show_ads)
+	side_button(right,"settings",t("Cài đặt","Settings"),show_settings)
+	item_buttons.stabilizer = side_button(right,"stabilizer",t("Giữ vững","Stabilize"),use_stabilizer)
+	item_buttons.safety = side_button(right,"safety",t("Cứu rơi","Safety"),arm_safety)
+	item_buttons.undo = side_button(right,"undo",t("Gỡ khối","Undo"),use_undo)
 	var row = HBoxContainer.new()
 	row.add_theme_constant_override("separation",8)
 	root_column.add_child(row)
@@ -289,7 +311,7 @@ func build_ui() -> void:
 	drop.custom_minimum_size = Vector2(280,82)
 	drop.add_theme_stylebox_override("normal",style(Color("139e9e")))
 	button(row,"↷",func(): rotate_active(15))
-	var hint = label(t("Kéo để di chuyển • A/D/W/S • Q/E xoay • Space thả","Drag to move • A/D/W/S • Q/E rotate • Space drop"),16)
+	var hint = label(t("Kéo để di chuyển • Xoay rồi thả","Drag to move • Rotate and drop"),20)
 	hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	hint.add_theme_color_override("font_color",Color("102b43"))
 	root_column.add_child(hint)
@@ -323,6 +345,72 @@ func build_ui() -> void:
 	scroll.add_child(modal_body)
 	button(column,t("Đóng / Tiếp tục","Close / Resume"),close_modal)
 	update_ui()
+
+func icon(key: String) -> Texture2D:
+	return load("res://assets/icons/%s.svg" % key)
+
+func stat_pill(parent: Node, key: String) -> Label:
+	var row = HBoxContainer.new()
+	row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	row.alignment = BoxContainer.ALIGNMENT_CENTER
+	parent.add_child(row)
+	var image = TextureRect.new()
+	image.texture = icon(key)
+	image.custom_minimum_size = Vector2(38,38)
+	image.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	image.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	row.add_child(image)
+	var value = label("0",28)
+	row.add_child(value)
+	return value
+
+func side_rail(right: bool) -> VBoxContainer:
+	var rail = VBoxContainer.new()
+	rail.name = "RightRail" if right else "LeftRail"
+	ui.add_child(rail)
+	if right:
+		rail.anchor_left = 1.0
+		rail.anchor_right = 1.0
+		rail.offset_left = -124
+		rail.offset_right = -18
+	else:
+		rail.offset_left = 18
+		rail.offset_right = 124
+	rail.offset_top = 230
+	rail.add_theme_constant_override("separation",12)
+	return rail
+
+func side_button(parent: Node, key: String, title: String, action: Callable) -> Button:
+	var node = button(parent,"",action)
+	node.custom_minimum_size = Vector2(106,100)
+	node.tooltip_text = title
+	var content = VBoxContainer.new()
+	content.name = "Content"
+	content.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	node.add_child(content)
+	content.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	content.offset_top = 5
+	content.offset_bottom = -4
+	content.add_theme_constant_override("separation",-3)
+	var image = TextureRect.new()
+	image.texture = icon(key)
+	image.custom_minimum_size = Vector2(48,48)
+	image.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	image.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	image.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	content.add_child(image)
+	var caption = label(title,22)
+	caption.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	caption.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	content.add_child(caption)
+	if key in ["stabilizer","safety","undo"]:
+		var count = label("1",18)
+		count.name = "Count"
+		count.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		count.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		count.add_theme_color_override("font_color",Color("ffdc7d"))
+		content.add_child(count)
+	return node
 
 func label(text: String, font_size: int = 22) -> Label:
 	var node = Label.new()
@@ -366,7 +454,7 @@ func _notification(what: int) -> void:
 	if what == NOTIFICATION_APPLICATION_PAUSED and is_instance_valid(ui):
 		bank_coins()
 		save_game()
-		show_settings()
+		if not ads.fullscreen: show_settings()
 
 func _physics_process(delta: float) -> void:
 	if state != "running": return
@@ -374,9 +462,6 @@ func _physics_process(delta: float) -> void:
 	impact_cooldown = maxf(0,impact_cooldown-delta)
 	status_time = maxf(0,status_time-delta)
 	recalculate_height()
-	if mode == "arena":
-		arena.tick(delta)
-		if state != "running": return
 	if mascot and settings.motion: mascot.rotation.y = sin(elapsed)*0.16
 	if is_instance_valid(active):
 		if active.freeze:
@@ -408,7 +493,6 @@ func _physics_process(delta: float) -> void:
 		if body.position.y < -2.0:
 			finish_run(true)
 			return
-	update_camera()
 	update_ui()
 
 func _unhandled_input(event: InputEvent) -> void:
@@ -433,12 +517,20 @@ func move_active(relative: Vector2) -> void:
 	manual_x = clampf(manual_x + (relative.x*camera.global_basis.x.x-relative.y*0.5)*0.011,-2.2,2.2)
 	manual_z = clampf(manual_z + (relative.x*camera.global_basis.x.z+relative.y*0.8)*0.011,-1.8,1.8)
 
-func update_camera() -> void:
-	# Orthographic camera retains depth/shadows but gives an exact screen-space anchor.
-	# The actual highest collider point maps to 2/3 of viewport height from the top.
+func _process(delta: float) -> void:
+	if state == "running": update_camera(delta)
+
+func update_camera(delta: float = 0.0) -> void:
+	# Render-frame smoothing follows accepted height, never a moving collider corner.
+	# A fixed X/Z anchor prevents side-to-side jumps when the highest corner changes.
+	if delta <= 0.0:
+		camera_height = camera_goal
+	else:
+		var desired = lerpf(camera_height,camera_goal,1.0-exp(-5.0*delta))
+		camera_height = move_toward(camera_height,desired,3.0*delta)
 	var view_size = get_viewport().get_visible_rect().size
 	var vertical_span = camera.size * view_size.y / view_size.x
-	var target = top_point + camera.global_basis.y * (vertical_span/6.0)
+	var target = Vector3(0,camera_height,0) + camera.global_basis.y * (vertical_span/6.0)
 	camera.position = target + camera.global_basis.z*24.0
 	world_decor.global_transform = camera.global_transform
 
@@ -477,8 +569,8 @@ func make_block(index: int) -> RigidBody3D:
 	body.physics_material_override = pm
 	Catalog.add_colliders(body,spec)
 	var path = "res://assets/models/%s.glb" % spec.id
-	if ResourceLoader.exists(path):
-		body.add_child(load(path).instantiate())
+	if model_cache.has(spec.id):
+		body.add_child(model_cache[spec.id].instantiate())
 	else:
 		for collider in body.get_children():
 			var mesh: Mesh
@@ -507,7 +599,6 @@ func spawn_block() -> void:
 	active.position = Vector3(manual_x,height_m+3.5,manual_z)
 	drop_age = 0
 	settle_time = 0
-	update_camera()
 
 func update_ghost() -> void:
 	var query = PhysicsRayQueryParameters3D.create(active.position,active.position-Vector3(0,1000,0))
@@ -535,8 +626,10 @@ func accept_active() -> void:
 	accepted.append(body)
 	active = null
 	recalculate_height()
+	camera_goal = height_m
 	var gain = maxf(0.0,height_m-height_record)
 	height_record = maxf(height_record,height_m)
+	best_height = maxf(best_height,height_record)
 	var tilt = acos(clampf(body.global_basis.y.dot(Vector3.UP),-1,1))
 	var distance = Vector2(body.position.x-previous.x,body.position.z-previous.z).length()
 	var perfect = distance < 0.18 and tilt < 0.12 and gain > 0.1
@@ -549,27 +642,21 @@ func accept_active() -> void:
 		if settings.vibration: Input.vibrate_handheld(35)
 	else:
 		message("Vững rồi — lên tiếp!","Steady — keep going!")
+	save_game()
 	spawn_wait = 0.35
 
 func finish_run(collapsed: bool) -> void:
 	if state != "running": return
 	state = "ended"
-	arena.running = false
 	ghost.visible = false
 	bank_coins()
 	best_height = maxf(best_height,height_record)
 	best_score = maxi(best_score,score)
-	var won = mode == "arena" and not collapsed and score > arena.opponent_score
 	if mode == "ranked": rank_points += mini(180,score/30)
-	if won: coins += 100
 	save_game()
-	audio.play("win" if won else "lose")
+	audio.play("lose" if collapsed else "win")
 	show_modal(t("Kết quả","Results"))
 	note(t("Chiều cao: %.1f m\nĐiểm: %d\nCoin kiếm được: %d","Height: %.1f m\nScore: %d\nCoins earned: %d") % [height_record,score,run_coins])
-	if mode == "arena":
-		var result = t("THẮNG +100 coin","WIN +100 coins") if won else t("THUA","LOSS")
-		if not collapsed and score == arena.opponent_score: result = t("HÒA","DRAW")
-		note("BOT: %d\n%s" % [arena.opponent_score,result])
 	button(modal_body,t("Chơi lại","Play again"),restart_run)
 	button(modal_body,t("Chơi tự do","Play casual"),func(): mode="casual"; restart_run())
 
@@ -598,11 +685,8 @@ func restart_run() -> void:
 	safety_armed = false
 	spawn_wait = 0
 	state = "running"
-	if mode == "arena":
-		var seed_number = rng.randi()
-		arena.start(seed_number,difficulty)
-		rng.seed = seed_number
-	else: arena.running = false
+	camera_goal = 0.0
+	update_camera()
 	next_index = 0
 	spawn_block()
 	update_ui()
@@ -633,6 +717,7 @@ func use_undo() -> void:
 	remove_child(body)
 	body.queue_free()
 	recalculate_height()
+	camera_goal = height_m
 	combo = 0
 	audio.play("rescue")
 	save_game()
@@ -650,13 +735,15 @@ func show_store() -> void:
 	note(t("Số dư: %d coin • Chỉ dùng tiền trong game","Balance: %d coins • In-game currency only") % coins)
 	for item in [["stabilizer",250,t("Giữ vững","Stabilizer")],["safety",400,t("Cứu rơi","Safety")],["undo",500,t("Gỡ khối","Undo")]]:
 		var node = button(modal_body,"%s ×1  •  %d" % [item[2],item[1]],func(): buy_item(item[0],item[1]))
+		node.icon = icon(item[0])
+		node.add_theme_constant_override("icon_max_width",40)
 		node.disabled = coins < item[1]
 	for item in [["day",0,t("Bầu trời ban ngày","Day sky")],["sunset",650,t("Hoàng hôn","Sunset")],["night",900,t("Đêm cực quang","Aurora night")]]:
 		var owned = item[0] in owned_themes
 		var text = "%s • %s" % [item[2],t("Đã sở hữu","Owned") if owned else str(item[1])+" coin"]
 		var node = button(modal_body,text,func(): buy_theme(item[0],item[1]))
 		node.disabled = not owned and coins < item[1]
-	note(t("Coin nhận khi xếp tháp; thắng Arena được thưởng 100 coin. Vật phẩm và kỹ năng chỉ áp dụng trong Chơi tự do.","Earn coins by stacking; win Arena for 100 coins. Items and skills apply only in Casual."))
+	note(t("Coin nhận khi xếp tháp hoặc xem quảng cáo thưởng. Vật phẩm và kỹ năng chỉ áp dụng trong Chơi tự do.","Earn coins by stacking or watching rewarded ads. Items and skills apply only in Casual."))
 
 func buy_item(key: String, cost: int) -> void:
 	var prices = {"stabilizer":250,"safety":400,"undo":500}
@@ -737,30 +824,89 @@ func show_settings() -> void:
 		modal_body.add_child(check)
 	note(t("Game tạm dừng khi mở menu. Kéo trên vùng chơi để di chuyển theo hai chiều; xoay bằng hai nút dưới cùng.","Menus pause the game. Drag in the play area to move in two directions; rotate with the bottom buttons."))
 
-func show_arena() -> void:
-	show_modal("ARENA")
-	note(t("Đấu BOT • 90 giây • Điểm cao hơn thắng\nTháp đổ là thua ngay. Không dùng vật phẩm/kỹ năng.","BOT match • 90 seconds • Highest score wins\nA collapsed tower loses immediately. No items or skills."))
-	for i in range(3):
-		var names = [t("Dễ","Easy"),t("Vừa","Normal"),t("Khó","Hard")]
-		button(modal_body,"BOT • "+names[i],func(): difficulty=i; mode="arena"; restart_run())
-	var human = button(modal_body,t("Người thật • Chưa có máy chủ","Human match • Server not configured"),func(): pass)
-	human.disabled = true
-	note(t("BOT là đối thủ mô phỏng, không phải người thật. Đã có giao diện phiên đấu để tích hợp máy chủ sau.","BOT is a simulated opponent, not a human. A session interface is ready for future server integration."))
+func show_ranking() -> void:
+	show_modal("RANKING • TOP 50")
+	note(t("Xếp theo độ cao tháp • Dữ liệu mẫu, chưa phải BXH online","Sorted by tower height • Sample data, not an online leaderboard"))
+	var personal = label(t("Kỷ lục của bạn: %.2f m","Your best: %.2f m") % best_height,25)
+	personal.add_theme_color_override("font_color",Color("ffdc7d"))
+	modal_body.add_child(personal)
+	var rows = Ranking.top50(best_height)
+	for i in range(rows.size()):
+		var entry = rows[i]
+		var panel = PanelContainer.new()
+		panel.add_theme_stylebox_override("panel",style(Color("246c78") if entry.id == "you" else Color("1c3e58"),12))
+		modal_body.add_child(panel)
+		var row = HBoxContainer.new()
+		row.add_theme_constant_override("separation",14)
+		panel.add_child(row)
+		var rank = label("%02d" % (i+1),24)
+		rank.custom_minimum_size.x = 44
+		row.add_child(rank)
+		if i < 3:
+			var medal = TextureRect.new()
+			medal.texture = icon("ranking")
+			medal.custom_minimum_size = Vector2(32,32)
+			medal.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+			medal.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+			row.add_child(medal)
+		var player = label(t("Bạn","You") if entry.id == "you" else entry.name,23)
+		player.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		row.add_child(player)
+		row.add_child(label("%.2f m" % entry.height,24))
+
+func show_ads() -> void:
+	show_modal(t("NHẬN COIN","FREE COINS"))
+	note(t("Xem hết quảng cáo thưởng để nhận 120 coin.","Complete a rewarded ad to earn 120 coins."))
+	note(t("Quảng cáo thử nghiệm Google • Chưa tạo doanh thu","Google test ads • No revenue generated"))
+	ads_status_label = label("",22)
+	ads_status_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	modal_body.add_child(ads_status_label)
+	watch_ad_button = button(modal_body,t("Xem quảng cáo • +120 coin","Watch ad • +120 coins"),func(): ads.show_reward())
+	watch_ad_button.icon = icon("ads")
+	watch_ad_button.add_theme_constant_override("icon_max_width",40)
+	button(modal_body,t("Thử tải lại","Retry loading"),func(): ads.load_reward())
+	refresh_ad_menu()
+
+func refresh_ad_menu() -> void:
+	if not is_instance_valid(ads_status_label) or not is_instance_valid(watch_ad_button): return
+	var messages = {
+		"desktop":["Quảng cáo có trên APK Android.","Ads are available in the Android APK."],
+		"unavailable":["Quảng cáo chưa sẵn sàng trên thiết bị này.","Ads are unavailable on this device."],
+		"loading":["Đang tải quảng cáo…","Loading ad…"],
+		"ready":["Quảng cáo đã sẵn sàng!","Ad ready!"],
+		"showing":["Đang xem quảng cáo…","Ad in progress…"],
+		"failed":["Chưa tải được. Kiểm tra kết nối và thử lại.","Could not load. Check your connection and retry."],
+		"idle":["Đang chuẩn bị quảng cáo tiếp theo…","Preparing the next ad…"]}
+	var pair = messages.get(ads.status,messages.failed)
+	ads_status_label.text = t(pair[0],pair[1])
+	watch_ad_button.disabled = ads.status != "ready"
+
+func on_ad_reward(amount: int) -> void:
+	coins += amount
+	save_game()
+	update_ui()
+	message("Đã nhận %d coin!" % amount,"Received %d coins!" % amount)
+	audio.play("coin")
 
 func show_modes() -> void:
 	show_modal(t("CHẾ ĐỘ CHƠI","GAME MODE"))
 	note(t("Kỷ lục: %.1f m • %d điểm\nRank nội bộ: %d RP","Best: %.1f m • %d points\nLocal rank: %d RP") % [best_height,best_score,rank_points])
 	button(modal_body,t("Chơi tự do • Có kỹ năng và vật phẩm","Casual • Skills and items enabled"),func(): mode="casual"; restart_run())
 	button(modal_body,t("Rank nội bộ • Vật lý công bằng","Local ranked • Equal physics"),func(): mode="ranked"; restart_run())
-	button(modal_body,"Arena",show_arena)
+	button(modal_body,"Ranking",show_ranking)
 	button(modal_body,t("Chơi lại lượt hiện tại","Restart current run"),restart_run)
 
 func update_ui() -> void:
 	if not is_instance_valid(hud): return
-	hud.text = "%.1f m    •    %d pts    •    %d coin" % [height_m,score,coins+maxi(0,run_coins-paid_coins)]
-	inventory.text = t("Giữ vững %d   •   Cứu rơi %d%s   •   Gỡ khối %d","Stabilize %d   •   Safety %d%s   •   Undo %d") % [rescue.stabilizer,rescue.safety," ✓" if safety_armed else "",rescue.undo]
-	if mode != "casual": inventory.text = t("Vật lý công bằng • Không dùng vật phẩm","Equal physics • Items disabled")
-	arena_hud.text = "BOT • %d pts • %.1f m    |    %ds" % [arena.opponent_score,arena.opponent_height,ceili(arena.remaining)] if mode == "arena" else (t("CHƠI TỰ DO","CASUAL") if mode == "casual" else t("RANK NỘI BỘ","LOCAL RANKED"))
+	hud.text = "%.1f m" % height_m
+	score_label.text = str(score)
+	coin_label.text = str(coins+maxi(0,run_coins-paid_coins))
+	inventory.text = t("Vật phẩm sẵn sàng ở bên phải","Boosters ready on the right") if mode == "casual" else t("Không dùng vật phẩm trong Ranked","Items disabled in Ranked")
+	for key in item_buttons:
+		var node = item_buttons[key]
+		node.get_node("Content/Count").text = str(rescue[key])+(" ✓" if key == "safety" and safety_armed else "")
+		node.disabled = mode != "casual" or state != "running"
+	arena_hud.text = t("CHƠI TỰ DO","CASUAL") if mode == "casual" else t("RANK NỘI BỘ","LOCAL RANKED")
 	if status_time <= 0 and is_instance_valid(active):
 		var spec = active.get_meta("spec")
 		var next = Catalog.BLOCKS[next_index]
@@ -808,6 +954,7 @@ func run_smoke() -> void:
 
 func capture_preview() -> void:
 	set_physics_process(false)
+	set_process(false)
 	if is_instance_valid(active):
 		remove_child(active)
 		active.queue_free()
@@ -821,6 +968,7 @@ func capture_preview() -> void:
 	recalculate_height()
 	spawn_block()
 	active.position = Vector3(0,height_m+3.2,0)
+	camera_goal = height_m
 	update_camera()
 	update_ui()
 	await get_tree().process_frame
@@ -835,8 +983,8 @@ func capture_preview() -> void:
 	await get_tree().process_frame
 	await RenderingServer.frame_post_draw
 	get_viewport().get_texture().get_image().save_png("res://../build/settings.png")
-	show_arena()
+	show_ranking()
 	await get_tree().process_frame
 	await RenderingServer.frame_post_draw
-	get_viewport().get_texture().get_image().save_png("res://../build/arena.png")
+	get_viewport().get_texture().get_image().save_png("res://../build/ranking.png")
 	get_tree().quit()

@@ -5,3 +5,7 @@ game/**/*.uid
 build/
 *.keystore
 *.zip
+
+game/android/
+game/assets/**/*.import
+game/addons/**/*.import

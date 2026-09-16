@@ -1,4 +1,4 @@
-; HighStack 3D â€” Godot 4.7.2
+; HighStack 3D — Godot 4.7.2
 config_version=5
 
 [application]
@@ -35,3 +35,6 @@ rotate_left={"deadzone":0.5,"events":[Object(InputEventKey,"physical_keycode":81
 rotate_right={"deadzone":0.5,"events":[Object(InputEventKey,"physical_keycode":69)]}
 move_left={"deadzone":0.5,"events":[Object(InputEventKey,"physical_keycode":65)]}
 move_right={"deadzone":0.5,"events":[Object(InputEventKey,"physical_keycode":68)]}
+
+[editor_plugins]
+enabled=PackedStringArray("res://addons/AdmobPlugin/plugin.cfg")

@@ -20,16 +20,31 @@ func run(game: Node) -> void:
 	check(game.audio.sounds.size() == 9 and game.audio.music.stream != null,"music and nine SFX imported")
 	# The viewport anchor must be independent of aspect, tower height and tilt.
 	game.set_physics_process(false)
+	game.set_process(false)
 	var original_size = game.get_viewport().size
 	for viewport_size in [Vector2i(720,1280),Vector2i(720,1600),Vector2i(768,1024)]:
 		game.get_viewport().size = viewport_size
 		await game.get_tree().process_frame
 		for h in [0.0,7.0,40.0,150.0]:
-			game.top_point = Vector3(0.3,h,-0.4)
+			game.top_point = Vector3(0,h,0)
+			game.camera_goal = h
 			game.height_m = h
 			game.update_camera()
 			var normalized_y = game.camera.unproject_position(game.top_point).y/game.get_viewport().get_visible_rect().size.y
 			check(absf(normalized_y-2.0/3.0) < 0.004,"camera anchor %.3f at %.0fm / %s" % [normalized_y,h,str(viewport_size)])
+	game.camera_goal = 2.0
+	game.update_camera()
+	var fixed_camera = game.camera.position
+	for i in range(30):
+		game.top_point = Vector3(-1 if i%2 else 1,2.0+sin(i)*0.03,0.5)
+		game.update_camera(1.0/60)
+	check(game.camera.position.is_equal_approx(fixed_camera),"camera ignores moving highest-corner jitter")
+	game.camera_goal = 5.0
+	var previous_camera = game.camera.position
+	game.update_camera(1.0/60)
+	check(game.camera.position.distance_to(previous_camera) <= 0.051,"camera rise is speed limited after settlement")
+	for i in range(240): game.update_camera(1.0/60)
+	check(absf(game.camera_height-5.0)<0.002,"camera eases toward settled height")
 	game.get_viewport().size = original_size
 	game.recalculate_height()
 	game.set_physics_process(true)
@@ -121,18 +136,35 @@ func run(game: Node) -> void:
 	await game.get_tree().physics_frame
 	check(game.state == "ended","uncaught fall ends run")
 	game.close_modal()
-	game.mode = "arena"
-	game.restart_run()
-	game.set_physics_process(false)
-	game.arena.tick(5)
-	check(game.arena.remaining == 85 and game.arena.next_move > 0,"bot advances on simulation clock")
-	game.score = 99999
+	var rows = game.Ranking.top50(0)
+	check(rows.size()==50,"Ranking starts with exactly 50 seeded records")
+	var sorted_ok = true
+	var names: Dictionary = {}
+	for i in range(50):
+		names[rows[i].name] = true
+		if i>0 and rows[i].height>rows[i-1].height: sorted_ok=false
+	check(sorted_ok and names.size()==50,"Ranking heights descending with unique player names")
+	rows = game.Ranking.top50(200)
+	check(rows.size()==50 and rows[0].id=="you" and rows[0].height==200,"personal best enters Top 50")
+	check(game.Ranking.top50(NAN).size()==50,"Ranking rejects non-finite local height")
+	game.show_ranking()
+	check(game.modal_body.get_child_count()==52,"Ranking renders all 50 rows plus explanatory labels")
+	game.close_modal()
+	check(game.ui.theme.default_font != null,"rounded Vietnamese font installed")
+	check(game.ui.has_node("LeftRail") and game.ui.has_node("RightRail"),"function buttons occupy both side rails")
+	for key in ["coin","stabilizer","safety","undo","ranking","ads"]:
+		check(game.icon(key)!=null,"item icon imported: "+key)
 	var balance = game.coins
-	game.arena.tick(85)
-	check(game.state == "ended" and game.coins == balance+100,"Arena timeout resolves and awards winner")
-	game.finish_run(false)
-	check(game.coins == balance+100,"Arena reward cannot be collected twice")
-	check(not game.arena.human_connection_status().available,"human match unavailable without server")
+	game.ads.grant_reward("unrequested")
+	check(game.coins==balance,"unrequested or unavailable ad grants no coins")
+	game.ads.showing_id = "test_callback"
+	game.ads.grant_reward("test_callback")
+	game.ads.grant_reward("test_callback")
+	check(game.coins==balance+120,"SDK reward callback grants exactly once")
+	game.ads.close_ad("test_callback")
+	check(game.coins==balance+120,"dismissal cannot grant coins")
+	game.show_ads()
+	check(game.watch_ad_button.disabled,"desktop cannot pretend to show a native ad")
 	game.close_modal()
 	print("HIGHSTACK_SMOKE: %d checks, %d failures" % [checks,failures.size()])
 	var output = {"checks":checks,"failures":failures,"engine":Engine.get_version_info().string}
