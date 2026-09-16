@@ -30,6 +30,10 @@ sleep 2
 adb shell input tap 105 1050
 sleep 15
 adb exec-out screencap -p > build/android-ads.png
+# Open only our opt-in rewarded button, never any advertiser destination.
+adb shell input tap 540 600
+sleep 15
+adb exec-out screencap -p > build/android-ad-playing.png
 adb logcat -d > build/android-logcat.txt
 if grep -E 'FATAL EXCEPTION|SCRIPT ERROR|Parse Error|Fatal signal|E godot.*ERROR:' build/android-logcat.txt; then
   exit 1

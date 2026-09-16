@@ -127,5 +127,6 @@ jobs:
             build/android-logcat.txt
             build/android-ranking.png
             build/android-ads.png
+            build/android-ad-playing.png
             build/android-last-screen.png
           if-no-files-found: error
