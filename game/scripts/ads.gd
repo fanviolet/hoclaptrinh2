@@ -13,6 +13,7 @@ var rewarded_ids: Dictionary = {}
 var fullscreen = false
 var sdk_ready = false
 var request_in_flight = false
+var request_serial = 0
 
 func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
@@ -31,6 +32,7 @@ func _ready() -> void:
 	sdk.rewarded_ad_dismissed_full_screen_content.connect(func(info): close_ad(info.get_ad_id()))
 	sdk.rewarded_ad_failed_to_show_full_screen_content.connect(func(info,_error): close_ad(info.get_ad_id()))
 	add_child(sdk)
+	sdk.set_request_configuration(sdk.create_request_configuration())
 	set_status("loading")
 	sdk.initialize()
 	print("HIGHSTACK_ADS: native SDK available; Google test ads only")
@@ -42,11 +44,13 @@ func set_status(value: String) -> void:
 func load_reward() -> void:
 	if not sdk_ready or request_in_flight or ready_id != "" or fullscreen: return
 	request_in_flight = true
+	request_serial += 1
+	var serial = request_serial
 	set_status("loading")
 	sdk.load_rewarded_ad(sdk.create_rewarded_ad_request())
 	# A stuck/offline request must leave a retry route and never grant a reward.
 	get_tree().create_timer(30.0).timeout.connect(func():
-		if request_in_flight: request_in_flight=false; set_status("failed"))
+		if request_in_flight and serial == request_serial: request_in_flight=false; set_status("failed"))
 
 func show_reward() -> bool:
 	if ready_id.is_empty() or fullscreen or not sdk_ready: return false

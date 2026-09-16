@@ -1,13 +1,12 @@
-# Build 0.3.0
+# Build 0.4.0
 
-Godot 4.7.2 / Blender 5.2.1. Android portrait, ARM64 and x86_64.
+Godot 4.7.2 / Blender 5.2.1. Android portrait ARM64+x86_64, Gradle source template.
+AdmobPlugin v7.0 and Google Mobile Ads 24.9.0, Google test rewarded inventory only.
 
-The active GitHub Actions workflow is the authoritative build recipe. It generates
-model and audio assets, runs the integration smoke suite, signs a test APK, verifies
-its ZIP and Android signature, and installs/launches it on an Android API 35 emulator.
-The Android export uses the official Godot binary template; the actual minimum and
-target SDK values are those embedded in that template and should be checked from
-the resulting APK before any store submission.
+The active GitHub Actions workflow is the authoritative build recipe. Runtime
+smoke tests cover physical stacking, camera smoothing, icons/font, Top 50 ranking,
+saving, economy and exactly-once ad rewards. Android smoke tests verify install,
+launch, drop input, rendering logs and Ranking/advertising UI screenshots.
 
-This is an offline playable build. Store uses in-game currency. Arena bot opponents
-are labelled; human matchmaking remains unavailable until a server is integrated.
+Ranking contains explicitly identified sample records plus the local best, not
+an online player service. Monetization is not activated. See docs/ADS.md.
