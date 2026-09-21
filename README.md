@@ -1,57 +1,51 @@
-# HighStack 3D — 0.4.0
+# HighStack 3D — 0.5.0
 
-Godot 4.7.2 / Blender 5.2.1 portrait stacking game.
+Godot 4.7.2 / Blender 5.2.1 portrait tower stacking game.
 
-## Changes
+The UI now uses Bungee display lettering and heavy Nunito body text with outlines
+and shadows. Store cards show original booster illustrations, quantities, effects,
+prices and selectable sky previews. The leaderboard includes a Top 3 podium and
+47 rows. Ranked gameplay has been removed; skills and boosters apply to the single
+stacking mode. The launcher and splash use original cat-and-tower artwork.
 
-- Original SVG icons for currency, boosters and menus; function buttons on two side
-  rails, with the middle reserved for the tower. Baloo 2 variable font (SIL OFL),
-  with Vietnamese glyphs and a rounded casual-game style.
-- Camera keeps a fixed horizontal anchor and eases to accepted tower height at
-  render-frame cadence, capped at 3 metres/second. Moving collider corners no longer
-  drive the camera; after easing, the tower height plane lies at 2/3 of the screen.
-  Model scenes are cached before play to reduce loading work at drop/next spawn.
-- Arena removed. Ranking shows 50 named sample height records in descending order,
-  clearly labelled as sample/offline data. A qualifying local best displaces the
-  lowest sample entry. Best height is persisted after every accepted placement.
-- Real Google Mobile Ads SDK integration through AdmobPlugin v7.0. This build uses
-  only Google's official test App ID and rewarded Ad Unit ID. Ads are opt-in from
-  the coin button; 120 coins are awarded only on the SDK earned-reward callback,
-  once per ad. Failed loads and early dismissal grant nothing. No banner obscures
-  the controls and no interstitial interrupts a drop. See docs/ADS.md.
+Leaderboard entries remain locally seeded plus a qualifying personal best. The
+user requested removal of explanatory prototype copy from the player interface;
+this does not create an online leaderboard. Technical limitations live here.
 
-The 13 Blender props, original audio, physics, Store, settings and local Ranked
-mode remain available. Drag to move in X/Z, rotate and tap DROP. Desktop controls:
-A/D/W/S, Q/E and Space. Menus pause the game.
+The user's AdMob app and rewarded unit are configured. Native UMP 4.0.0 requests
+fresh consent information on launch, presents required forms, and gates ad loading
+on canRequestAds. Settings exposes privacy options when UMP requires it. Ads are
+opt-in and award 120 coins only once on the earned-reward callback. See docs/ADS.md.
 
-## Build and verification
+## Build
 
-The GitHub Actions workflow generates model/audio assets, imports the project,
-executes the integration smoke suite, installs the matching Godot Android Gradle
-source template, and exports a signed ARM64+x86_64 debug APK including the native
-AdMob AAR and Maven dependencies. Android SDK/network access is required for Gradle.
+The existing GitHub Actions workflow generates the 13 Blender models and audio,
+imports Godot, executes smoke tests, exports a Gradle Android APK and verifies
+signature/install/launch/screenshots on an Android emulator. It packages the custom
+UMP bridge through an editor export plugin. ARM64 and x86_64 are included.
 
-Local runtime verification:
+Local commands:
 
-```text
-blender -b --python tools/blender_assets.py
-python tools/audio_assets.py
+```
+python tools/ui_assets.py
+godot --headless --path game --script ../tools/export_icons.gd
 godot --headless --editor --path game --quit
 godot --headless --path game -- --smoke
 godot --path game -- --capture
 ```
 
-Create build/ before capture. Capture assembles an illustrative tower; the smoke
-suite separately tests real rigid-body falls and settlement, camera continuity,
-ranking and the ad reward boundary. CI additionally checks APK signatures and runs
-an Android install/launch/touch/render smoke test. Actual ad fill requires internet.
+Model/audio generation requires tools/blender_assets.py and tools/audio_assets.py.
+Create build/ before capture. Capture renders an illustrative tower; physics is
+verified separately in smoke tests. Controls: drag, rotate, DROP; desktop WASD/QE/Space.
+Menus pause physics. The camera eases to settled tower height at a 2/3 screen anchor.
 
-The CI debug signing key is generated per build. To install over an older build
-signed with a different key, uninstall the old app first (removes its local save).
-A stable publisher signing key is required for public updateable releases.
+CI generates a new debug signing key per build. Installing over an older APK may
+require uninstalling it (deletes its local save). A stable publisher signing key
+is still needed for public updateable releases.
 
-## Attribution
+## Licenses
 
-Baloo 2: Google Fonts / Ek Type, SIL Open Font License in game/assets/fonts/OFL.txt.
-AdmobPlugin v7.0: godot-sdk-integrations, MIT license in its addon directory.
-Original icons, procedural model geometry and synthesized audio are project assets.
+Bungee and Nunito: SIL OFL, accompanying license files in game/assets/fonts.
+AdmobPlugin v7.0: MIT, bundled license. Original vector illustrations, models and
+synthesized audio belong to this project. CatnRobot was a visual reference; its
+proprietary font and artwork were not copied.

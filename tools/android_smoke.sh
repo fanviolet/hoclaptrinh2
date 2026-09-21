@@ -9,7 +9,7 @@ collect() {
   fi
 }
 trap 'collect $?' EXIT
-adb install --no-incremental build/HighStack3D-v0.4.0.apk
+adb install --no-incremental build/HighStack3D-v0.5.0.apk
 adb shell settings put secure immersive_mode_confirmations confirmed
 adb logcat -c
 activity=$(adb shell cmd package resolve-activity --brief "$package" | tr -d '\r' | tail -n 1)
@@ -21,17 +21,22 @@ sleep 12
 adb shell pidof "$package"
 collect 0
 adb exec-out screencap -p > build/android-gameplay.png
-# Open Ranking, then Ads, retaining screenshots of both native APK screens.
+# Capture Store, then Ranking and Ads.
+adb shell input tap 105 410
+sleep 3
+adb exec-out screencap -p > build/android-store.png
+adb shell input tap 540 1710
+sleep 2
 adb shell input tap 105 548
 sleep 3
 adb exec-out screencap -p > build/android-ranking.png
 adb shell input tap 540 1710
 sleep 2
-adb shell input tap 105 1050
+adb shell input tap 105 880
 sleep 15
 adb exec-out screencap -p > build/android-ads.png
 # Open only our opt-in rewarded button, never any advertiser destination.
-adb shell input tap 540 600
+adb shell input tap 540 545
 sleep 15
 adb exec-out screencap -p > build/android-ad-playing.png
 adb logcat -d > build/android-logcat.txt

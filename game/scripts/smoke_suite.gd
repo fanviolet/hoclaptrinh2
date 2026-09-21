@@ -73,12 +73,6 @@ func run(game: Node) -> void:
 	game.settings.language = "vi"
 	game.load_save()
 	check(game.settings.language == "en" and game.settings.music == 0.0,"settings survive save/reload")
-	game.mode = "ranked"
-	game.skills = [5,5,5,5,5]
-	var ranked = game.make_block(0)
-	check(is_equal_approx(ranked.physics_material_override.friction,0.78) and is_equal_approx(ranked.mass,1.2),"ranked ignores skill boosts")
-	ranked.queue_free()
-	game.mode = "casual"
 	game.skills = [0,0,0,0,0]
 	game.restart_run()
 	# Every generated GLB is mandatory for the packaged build, and must match Y-up bounds.
@@ -148,13 +142,18 @@ func run(game: Node) -> void:
 	check(rows.size()==50 and rows[0].id=="you" and rows[0].height==200,"personal best enters Top 50")
 	check(game.Ranking.top50(NAN).size()==50,"Ranking rejects non-finite local height")
 	game.show_ranking()
-	check(game.modal_body.get_child_count()==52,"Ranking renders all 50 rows plus explanatory labels")
+	check(game.modal_body.get_node("Podium").get_child_count()==3 and game.modal_body.get_node("LeaderboardRows").get_child_count()==47,"Leaderboard renders Top 3 plus 47 rows")
 	game.close_modal()
 	check(game.ui.theme.default_font != null,"rounded Vietnamese font installed")
 	check(game.ui.has_node("LeftRail") and game.ui.has_node("RightRail"),"function buttons occupy both side rails")
 	for key in ["coin","stabilizer","safety","undo","ranking","ads"]:
 		check(game.icon(key)!=null,"item icon imported: "+key)
 	var balance = game.coins
+	game.ads.ready_id = "blocked_by_consent"
+	game.ads.sdk_ready = true
+	check(not game.ads.show_reward() and game.ads.ready_id == "blocked_by_consent","consent gate prevents even cached ads from showing")
+	game.ads.ready_id = ""
+	game.ads.sdk_ready = false
 	game.ads.grant_reward("unrequested")
 	check(game.coins==balance,"unrequested or unavailable ad grants no coins")
 	game.ads.showing_id = "test_callback"

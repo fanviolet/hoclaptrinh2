@@ -15,7 +15,6 @@ var owned_themes = ["day"]
 var selected_theme = "day"
 var best_score = 0
 var best_height = 0.0
-var rank_points = 0
 var save_path = SAVE_PATH
 var rng = RandomNumberGenerator.new()
 var camera: Camera3D
@@ -31,6 +30,7 @@ var camera_height = 0.0
 var camera_goal = 0.0
 var ads_status_label: Label
 var watch_ad_button: Button
+var privacy_button: Button
 var active: RigidBody3D
 var accepted: Array[RigidBody3D] = []
 var ghost: MeshInstance3D
@@ -43,9 +43,8 @@ var modal_body: VBoxContainer
 var hud: Label
 var status: Label
 var inventory: Label
-var arena_hud: Label
+var record_hud: Label
 var root_column: VBoxContainer
-var mode = "casual"
 var state = "running"
 var height_m = 0.0
 var height_record = 0.0
@@ -237,8 +236,9 @@ func build_ui() -> void:
 	layer.add_child(ui)
 	var theme = Theme.new()
 	var game_font = FontVariation.new()
-	game_font.base_font = load("res://assets/fonts/Baloo2.ttf")
-	game_font.variation_opentype = {"wght":650}
+	game_font.base_font = load("res://assets/fonts/Nunito.ttf")
+	game_font.variation_opentype = {TextServerManager.get_primary_interface().name_to_tag("wght"):900}
+	game_font.variation_embolden = 0.5
 	theme.default_font = game_font
 	theme.default_font_size = 23
 	theme.set_stylebox("normal","Button",style(Color("17354f")))
@@ -248,6 +248,12 @@ func build_ui() -> void:
 	theme.set_stylebox("panel","PanelContainer",style(Color("102b43"),26))
 	theme.set_color("font_color","Label",Color("eef6ff"))
 	theme.set_color("font_color","Button",Color("eef6ff"))
+	for kind in ["Label","Button","CheckButton"]:
+		theme.set_color("font_outline_color",kind,Color("102139"))
+		theme.set_constant("outline_size",kind,2)
+	theme.set_color("font_shadow_color","Label",Color("07152a"))
+	theme.set_constant("shadow_offset_y","Label",1)
+	theme.set_constant("shadow_offset_x","Label",0)
 	ui.theme = theme
 	var margin = MarginContainer.new()
 	margin.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
@@ -267,6 +273,10 @@ func build_ui() -> void:
 	logo.text = "HIGHSTACK 3D"
 	logo.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	logo.add_theme_font_size_override("font_size",44)
+	logo.add_theme_font_override("font",load("res://assets/fonts/Bungee-Regular.ttf"))
+	logo.add_theme_color_override("font_color",Color("ffdc74"))
+	logo.add_theme_constant_override("outline_size",9)
+	logo.add_theme_constant_override("shadow_offset_y",6)
 	var panel = PanelContainer.new()
 	root_column.add_child(panel)
 	var stats = HBoxContainer.new()
@@ -274,9 +284,9 @@ func build_ui() -> void:
 	hud = stat_pill(stats,"height")
 	score_label = stat_pill(stats,"star")
 	coin_label = stat_pill(stats,"coin")
-	arena_hud = label("",19)
-	arena_hud.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	root_column.add_child(arena_hud)
+	record_hud = label("",19)
+	record_hud.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	root_column.add_child(record_hud)
 	status = label("",22)
 	status.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
@@ -287,7 +297,7 @@ func build_ui() -> void:
 	spacer.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	root_column.add_child(spacer)
 	inventory = label("",19)
-	inventory.add_theme_color_override("font_color",Color("102b43"))
+	inventory.add_theme_color_override("font_color",Color("ffffff"))
 	inventory.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	root_column.add_child(inventory)
 	# Two side rails keep menus and boosters away from the center of play.
@@ -295,9 +305,8 @@ func build_ui() -> void:
 	var left = side_rail(false)
 	var right = side_rail(true)
 	side_button(left,"store",t("Cửa hàng","Store"),show_store)
-	side_button(left,"ranking","Ranking",show_ranking)
+	side_button(left,"ranking",t("Xếp hạng","Top 50"),show_ranking)
 	side_button(left,"skills",t("Kỹ năng","Skills"),show_skills)
-	side_button(left,"mode",t("Chế độ","Mode"),show_modes)
 	side_button(left,"ads",t("Nhận coin","Free coins"),show_ads)
 	side_button(right,"settings",t("Cài đặt","Settings"),show_settings)
 	item_buttons.stabilizer = side_button(right,"stabilizer",t("Giữ vững","Stabilize"),use_stabilizer)
@@ -313,7 +322,7 @@ func build_ui() -> void:
 	button(row,"↷",func(): rotate_active(15))
 	var hint = label(t("Kéo để di chuyển • Xoay rồi thả","Drag to move • Rotate and drop"),20)
 	hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	hint.add_theme_color_override("font_color",Color("102b43"))
+	hint.add_theme_color_override("font_color",Color("ffffff"))
 	root_column.add_child(hint)
 	var shade = ColorRect.new()
 	shade.name = "Shade"
@@ -332,7 +341,9 @@ func build_ui() -> void:
 	var column = VBoxContainer.new()
 	column.add_theme_constant_override("separation",16)
 	modal.add_child(column)
-	modal_title = label("",30)
+	modal_title = label("",28)
+	modal_title.add_theme_font_override("font",load("res://assets/fonts/Bungee-Regular.ttf"))
+	modal_title.add_theme_color_override("font_color",Color("ffdc74"))
 	modal_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	column.add_child(modal_title)
 	var scroll = ScrollContainer.new()
@@ -399,12 +410,12 @@ func side_button(parent: Node, key: String, title: String, action: Callable) -> 
 	image.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
 	image.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	content.add_child(image)
-	var caption = label(title,22)
+	var caption = label(title,19)
 	caption.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	caption.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	content.add_child(caption)
 	if key in ["stabilizer","safety","undo"]:
-		var count = label("1",18)
+		var count = label("1",15)
 		count.name = "Count"
 		count.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		count.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -454,7 +465,7 @@ func _notification(what: int) -> void:
 	if what == NOTIFICATION_APPLICATION_PAUSED and is_instance_valid(ui):
 		bank_coins()
 		save_game()
-		if not ads.fullscreen: show_settings()
+		if not ads.fullscreen and not ads.privacy_busy: show_settings()
 
 func _physics_process(delta: float) -> void:
 	if state != "running": return
@@ -470,7 +481,7 @@ func _physics_process(delta: float) -> void:
 		else:
 			drop_age += delta
 			if active.position.y < -2.0 or Vector2(active.position.x,active.position.z).length() > 5:
-				if safety_armed and mode == "casual":
+				if safety_armed:
 					safety_armed = false
 					active.freeze = true
 					active.linear_velocity = Vector3.ZERO
@@ -559,7 +570,7 @@ func make_block(index: int) -> RigidBody3D:
 	var pm = PhysicsMaterial.new()
 	pm.friction = 0.78
 	pm.bounce = 0.015
-	if mode == "casual" and wooden:
+	if wooden:
 		pm.friction += skills[0]*0.06
 		body.linear_damp += skills[1]*0.045
 		body.angular_damp += skills[1]*0.09
@@ -635,7 +646,7 @@ func accept_active() -> void:
 	var perfect = distance < 0.18 and tilt < 0.12 and gain > 0.1
 	combo = combo+1 if perfect else 0
 	score += int(gain*120)+60+(80+combo*20 if perfect else 20)
-	run_coins += int(gain*8)+ (8+skills[4]*2 if perfect and mode == "casual" else 4)
+	run_coins += int(gain*8)+ (8+skills[4]*2 if perfect else 4)
 	if perfect:
 		audio.play("perfect",1.0+minf(combo*0.03,0.3))
 		message("HOÀN HẢO ×%d" % combo,"PERFECT ×%d" % combo)
@@ -652,13 +663,11 @@ func finish_run(collapsed: bool) -> void:
 	bank_coins()
 	best_height = maxf(best_height,height_record)
 	best_score = maxi(best_score,score)
-	if mode == "ranked": rank_points += mini(180,score/30)
 	save_game()
 	audio.play("lose" if collapsed else "win")
 	show_modal(t("Kết quả","Results"))
 	note(t("Chiều cao: %.1f m\nĐiểm: %d\nCoin kiếm được: %d","Height: %.1f m\nScore: %d\nCoins earned: %d") % [height_record,score,run_coins])
 	button(modal_body,t("Chơi lại","Play again"),restart_run)
-	button(modal_body,t("Chơi tự do","Play casual"),func(): mode="casual"; restart_run())
 
 func bank_coins() -> void:
 	coins += maxi(0,run_coins-paid_coins)
@@ -723,27 +732,71 @@ func use_undo() -> void:
 	save_game()
 
 func can_use_item(key: String) -> bool:
-	if modal.visible or mode != "casual" or state != "running": return false
+	if modal.visible or state != "running": return false
 	if rescue[key] <= 0:
 		message("Hết vật phẩm — ghé Cửa hàng","Out of items — visit Store")
 		return false
 	return true
 
+func art(parent: Node, key: String, dimensions: Vector2) -> TextureRect:
+	var picture = TextureRect.new()
+	picture.texture = load("res://assets/illustrations/%s.svg" % key)
+	picture.custom_minimum_size = dimensions
+	picture.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	picture.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	picture.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	parent.add_child(picture)
+	return picture
+
+func card(parent: Node, tint: Color = Color("234961")) -> VBoxContainer:
+	var panel = PanelContainer.new()
+	panel.add_theme_stylebox_override("panel",style(tint,18))
+	parent.add_child(panel)
+	var column = VBoxContainer.new()
+	column.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	column.add_theme_constant_override("separation",10)
+	panel.add_child(column)
+	return column
+
 func show_store() -> void:
 	bank_coins()
 	show_modal(t("CỬA HÀNG","STORE"))
-	note(t("Số dư: %d coin • Chỉ dùng tiền trong game","Balance: %d coins • In-game currency only") % coins)
-	for item in [["stabilizer",250,t("Giữ vững","Stabilizer")],["safety",400,t("Cứu rơi","Safety")],["undo",500,t("Gỡ khối","Undo")]]:
-		var node = button(modal_body,"%s ×1  •  %d" % [item[2],item[1]],func(): buy_item(item[0],item[1]))
-		node.icon = icon(item[0])
-		node.add_theme_constant_override("icon_max_width",40)
-		node.disabled = coins < item[1]
-	for item in [["day",0,t("Bầu trời ban ngày","Day sky")],["sunset",650,t("Hoàng hôn","Sunset")],["night",900,t("Đêm cực quang","Aurora night")]]:
+	var wallet = stat_pill(modal_body,"coin")
+	wallet.text = t("%d coin","%d coins") % coins
+	note(t("TRỢ THỦ XẾP THÁP","TOWER BOOSTERS"))
+	for item in [
+		["stabilizer",250,t("GIỮ VỮNG","STABILIZER"),t("Giảm rung lắc, giúp tháp đứng vững.","Calm the tower and steady your stack.")],
+		["safety",400,t("CỨU RƠI","SAFETY"),t("Cứu khối rơi hụt để tiếp tục lượt chơi.","Rescue a missed block and keep playing.")],
+		["undo",500,t("GỠ KHỐI","UNDO"),t("Gỡ khối trên cùng để xếp lại.","Remove the top block for another try.")]]:
+		var content = card(modal_body)
+		var row = HBoxContainer.new()
+		row.add_theme_constant_override("separation",16)
+		content.add_child(row)
+		art(row,item[0],Vector2(138,142))
+		var info = VBoxContainer.new()
+		info.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		row.add_child(info)
+		info.add_child(label(item[2],24))
+		var description = label(item[3],18)
+		description.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		info.add_child(description)
+		info.add_child(label(t("Đang có: %d","Owned: %d") % rescue[item[0]],18))
+		var buy = button(info,t("MUA ×1  •  %d","BUY ×1  •  %d") % item[1],func(): buy_item(item[0],item[1]))
+		buy.icon = icon("coin")
+		buy.add_theme_constant_override("icon_max_width",26)
+		buy.disabled = coins < item[1]
+		buy.custom_minimum_size.y = 48
+	note(t("BỘ SƯU TẬP BẦU TRỜI","SKY COLLECTION"))
+	for item in [["day",0,t("BAN NGÀY","DAYLIGHT")],["sunset",650,t("HOÀNG HÔN","SUNSET")],["night",900,t("CỰC QUANG","AURORA")]]:
+		var content = card(modal_body)
+		art(content,item[0],Vector2(0,150))
+		content.add_child(label(item[2],24))
 		var owned = item[0] in owned_themes
-		var text = "%s • %s" % [item[2],t("Đã sở hữu","Owned") if owned else str(item[1])+" coin"]
-		var node = button(modal_body,text,func(): buy_theme(item[0],item[1]))
-		node.disabled = not owned and coins < item[1]
-	note(t("Coin nhận khi xếp tháp hoặc xem quảng cáo thưởng. Vật phẩm và kỹ năng chỉ áp dụng trong Chơi tự do.","Earn coins by stacking or watching rewarded ads. Items and skills apply only in Casual."))
+		var active_theme = selected_theme == item[0]
+		var caption = t("ĐANG DÙNG","EQUIPPED") if active_theme else (t("SỬ DỤNG","EQUIP") if owned else t("MUA • %d coin","BUY • %d coins") % item[1])
+		var buy = button(content,caption,func(): buy_theme(item[0],item[1]))
+		buy.disabled = active_theme or (not owned and coins < item[1])
+	note(t("Xếp tháp hoặc xem quảng cáo để kiếm thêm coin.","Stack towers or watch ads to earn more coins."))
 
 func buy_item(key: String, cost: int) -> void:
 	var prices = {"stabilizer":250,"safety":400,"undo":500}
@@ -782,7 +835,7 @@ func apply_theme() -> void:
 
 func show_skills() -> void:
 	show_modal(t("KỸ NĂNG GỖ","WOOD SKILLS"))
-	note(t("Chỉ áp dụng cho khối gỗ trong Chơi tự do.","Applies to wooden blocks in Casual only."))
+	note(t("Áp dụng cho các khối gỗ.","Applies to wooden blocks."))
 	for i in range(skills.size()):
 		var level = int(skills[i])
 		var text = "%s  %d/5" % [t(SKILL_NAMES[i][0],SKILL_NAMES[i][1]),level]
@@ -800,6 +853,9 @@ func upgrade_skill(index: int) -> void:
 
 func show_settings() -> void:
 	show_modal(t("CÀI ĐẶT","SETTINGS"))
+	privacy_button = button(modal_body,t("Quyền riêng tư quảng cáo","Ad privacy choices"),func(): ads.show_privacy_options())
+	privacy_button.visible = is_instance_valid(ads) and ads.privacy_required
+	button(modal_body,t("Chơi lại lượt hiện tại","Restart current run"),restart_run)
 	for pair in [["music",t("Nhạc nền","Music")],["sfx",t("Hiệu ứng âm thanh","Sound effects")]]:
 		note(pair[1])
 		var slider = HSlider.new()
@@ -825,39 +881,64 @@ func show_settings() -> void:
 	note(t("Game tạm dừng khi mở menu. Kéo trên vùng chơi để di chuyển theo hai chiều; xoay bằng hai nút dưới cùng.","Menus pause the game. Drag in the play area to move in two directions; rotate with the bottom buttons."))
 
 func show_ranking() -> void:
-	show_modal("RANKING • TOP 50")
-	note(t("Xếp theo độ cao tháp • Dữ liệu mẫu, chưa phải BXH online","Sorted by tower height • Sample data, not an online leaderboard"))
-	var personal = label(t("Kỷ lục của bạn: %.2f m","Your best: %.2f m") % best_height,25)
+	show_modal(t("BẢNG XẾP HẠNG","LEADERBOARD"))
+	var hero = card(modal_body,Color("24566b"))
+	var hero_row = HBoxContainer.new()
+	hero.add_child(hero_row)
+	art(hero_row,"trophy",Vector2(100,100))
+	var heading = VBoxContainer.new()
+	heading.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	hero_row.add_child(heading)
+	heading.add_child(label("TOP 50",36))
+	heading.add_child(label(t("CHINH PHỤC BẦU TRỜI","REACH FOR THE SKY"),20))
+	var personal = label(t("Kỷ lục của bạn: %.2f m","Your best: %.2f m") % best_height,23)
 	personal.add_theme_color_override("font_color",Color("ffdc7d"))
-	modal_body.add_child(personal)
+	hero.add_child(personal)
 	var rows = Ranking.top50(best_height)
-	for i in range(rows.size()):
+	var podium = HBoxContainer.new()
+	podium.name = "Podium"
+	podium.add_theme_constant_override("separation",8)
+	modal_body.add_child(podium)
+	for i in [1,0,2]:
 		var entry = rows[i]
-		var panel = PanelContainer.new()
-		panel.add_theme_stylebox_override("panel",style(Color("246c78") if entry.id == "you" else Color("1c3e58"),12))
-		modal_body.add_child(panel)
+		var column = card(podium,[Color("705723"),Color("435b77"),Color("734d42")][i])
+		column.get_parent().size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		column.get_parent().size_flags_stretch_ratio = 1.0
+		var crown = label("#%d" % (i+1),30)
+		crown.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		column.add_child(crown)
+		art(column,"avatar%d" % i,Vector2(0,82 if i==0 else 66))
+		var name_label = label(t("Bạn","You") if entry.id == "you" else entry.name,18)
+		name_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		name_label.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+		column.add_child(name_label)
+		var value = label("%.2f m" % entry.height,20)
+		value.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		column.add_child(value)
+	note(t("HẠNG     NGƯỜI CHƠI                      ĐỘ CAO","RANK      PLAYER                               HEIGHT"))
+	var listing = VBoxContainer.new()
+	listing.name = "LeaderboardRows"
+	listing.add_theme_constant_override("separation",8)
+	modal_body.add_child(listing)
+	for i in range(3,rows.size()):
+		var entry = rows[i]
+		var column = card(listing,Color("246c78") if entry.id == "you" else Color("1c3e58"))
 		var row = HBoxContainer.new()
-		row.add_theme_constant_override("separation",14)
-		panel.add_child(row)
-		var rank = label("%02d" % (i+1),24)
-		rank.custom_minimum_size.x = 44
-		row.add_child(rank)
-		if i < 3:
-			var medal = TextureRect.new()
-			medal.texture = icon("ranking")
-			medal.custom_minimum_size = Vector2(32,32)
-			medal.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-			medal.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-			row.add_child(medal)
-		var player = label(t("Bạn","You") if entry.id == "you" else entry.name,23)
+		row.add_theme_constant_override("separation",10)
+		column.add_child(row)
+		var rank_label = label("%02d" % (i+1),22)
+		rank_label.custom_minimum_size.x = 38
+		row.add_child(rank_label)
+		art(row,"avatar%d" % (i%3),Vector2(42,42))
+		var player = label(t("Bạn","You") if entry.id == "you" else entry.name,21)
 		player.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		player.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
 		row.add_child(player)
-		row.add_child(label("%.2f m" % entry.height,24))
+		row.add_child(label("%.2f m" % entry.height,22))
 
 func show_ads() -> void:
 	show_modal(t("NHẬN COIN","FREE COINS"))
 	note(t("Xem hết quảng cáo thưởng để nhận 120 coin.","Complete a rewarded ad to earn 120 coins."))
-	note(t("Quảng cáo thử nghiệm Google • Chưa tạo doanh thu","Google test ads • No revenue generated"))
 	ads_status_label = label("",22)
 	ads_status_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	modal_body.add_child(ads_status_label)
@@ -868,8 +949,11 @@ func show_ads() -> void:
 	refresh_ad_menu()
 
 func refresh_ad_menu() -> void:
+	if is_instance_valid(privacy_button): privacy_button.visible = ads.privacy_required
 	if not is_instance_valid(ads_status_label) or not is_instance_valid(watch_ad_button): return
 	var messages = {
+		"privacy":["Đang chuẩn bị lựa chọn quyền riêng tư…","Preparing privacy choices…"],
+		"privacy_failed":["Chưa thể tải quảng cáo. Vui lòng thử lại sau.","Ads are not available yet. Please retry later."],
 		"desktop":["Quảng cáo có trên APK Android.","Ads are available in the Android APK."],
 		"unavailable":["Quảng cáo chưa sẵn sàng trên thiết bị này.","Ads are unavailable on this device."],
 		"loading":["Đang tải quảng cáo…","Loading ad…"],
@@ -888,25 +972,17 @@ func on_ad_reward(amount: int) -> void:
 	message("Đã nhận %d coin!" % amount,"Received %d coins!" % amount)
 	audio.play("coin")
 
-func show_modes() -> void:
-	show_modal(t("CHẾ ĐỘ CHƠI","GAME MODE"))
-	note(t("Kỷ lục: %.1f m • %d điểm\nRank nội bộ: %d RP","Best: %.1f m • %d points\nLocal rank: %d RP") % [best_height,best_score,rank_points])
-	button(modal_body,t("Chơi tự do • Có kỹ năng và vật phẩm","Casual • Skills and items enabled"),func(): mode="casual"; restart_run())
-	button(modal_body,t("Rank nội bộ • Vật lý công bằng","Local ranked • Equal physics"),func(): mode="ranked"; restart_run())
-	button(modal_body,"Ranking",show_ranking)
-	button(modal_body,t("Chơi lại lượt hiện tại","Restart current run"),restart_run)
-
 func update_ui() -> void:
 	if not is_instance_valid(hud): return
 	hud.text = "%.1f m" % height_m
 	score_label.text = str(score)
 	coin_label.text = str(coins+maxi(0,run_coins-paid_coins))
-	inventory.text = t("Vật phẩm sẵn sàng ở bên phải","Boosters ready on the right") if mode == "casual" else t("Không dùng vật phẩm trong Ranked","Items disabled in Ranked")
+	inventory.text = t("Vật phẩm sẵn sàng ở bên phải","Boosters ready on the right")
 	for key in item_buttons:
 		var node = item_buttons[key]
 		node.get_node("Content/Count").text = str(rescue[key])+(" ✓" if key == "safety" and safety_armed else "")
-		node.disabled = mode != "casual" or state != "running"
-	arena_hud.text = t("CHƠI TỰ DO","CASUAL") if mode == "casual" else t("RANK NỘI BỘ","LOCAL RANKED")
+		node.disabled = state != "running"
+	record_hud.text = t("KỶ LỤC: %.1f m","BEST: %.1f m") % best_height
 	if status_time <= 0 and is_instance_valid(active):
 		var spec = active.get_meta("spec")
 		var next = Catalog.BLOCKS[next_index]
@@ -918,7 +994,6 @@ func load_save() -> void:
 	coins = maxi(0,int(config.get_value("player","coins",900)))
 	best_score = maxi(0,int(config.get_value("player","best_score",0)))
 	best_height = maxf(0,float(config.get_value("player","best_height",0)))
-	rank_points = maxi(0,int(config.get_value("player","rank_points",0)))
 	var saved_skills = config.get_value("player","skills",skills)
 	if saved_skills is Array and saved_skills.size() == 5:
 		for i in range(5): skills[i] = clampi(int(saved_skills[i]),0,5)
@@ -940,7 +1015,7 @@ func load_save() -> void:
 
 func save_game() -> void:
 	var config = ConfigFile.new()
-	for pair in [["coins",coins],["best_score",best_score],["best_height",best_height],["rank_points",rank_points],["skills",skills],["rescue",rescue],["themes",owned_themes],["theme",selected_theme]]:
+	for pair in [["coins",coins],["best_score",best_score],["best_height",best_height],["skills",skills],["rescue",rescue],["themes",owned_themes],["theme",selected_theme]]:
 		config.set_value("player",pair[0],pair[1])
 	for key in settings: config.set_value("settings",key,settings[key])
 	var error = config.save(save_path+".tmp")
