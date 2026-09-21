@@ -40,6 +40,8 @@ adb shell input tap 540 545
 sleep 15
 adb exec-out screencap -p > build/android-ad-playing.png
 adb logcat -d > build/android-logcat.txt
+grep -q 'HIGHSTACK_ADS: publisher rewarded unit configured' build/android-logcat.txt
+grep -q 'HIGHSTACK_PRIVACY:' build/android-logcat.txt
 if grep -E 'FATAL EXCEPTION|SCRIPT ERROR|Parse Error|Fatal signal|E godot.*ERROR:' build/android-logcat.txt; then
   exit 1
 fi

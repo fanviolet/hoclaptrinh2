@@ -24,3 +24,4 @@ foreground='<ellipse cx="257" cy="410" rx="155" ry="34" fill="#134a89" opacity="
 (ROOT/'launcher.svg').write_text(svg(background+foreground,512,512))
 (ROOT/'launcher_foreground.svg').write_text(svg('<g transform="translate(55 55) scale(.78)">'+foreground+'</g>',512,512))
 (ROOT/'launcher_background.svg').write_text(svg(background,512,512))
+(ROOT/'launcher_monochrome.svg').write_text(svg('<g fill="white"><path d="m145 301 111-53 111 53v79l-111 53-111-53zM170 219l86-42 86 42v65l-86 41-86-41z"/><path d="m210 178-9-79 35 22q20-7 40 0l35-22-9 79q-46 36-92 0z"/><path d="m116 230 8 18 19 7-19 7-8 19-7-19-19-7 19-7zM389 290l7 17 17 6-17 7-7 16-6-16-18-7 18-6z"/></g>',512,512))
