@@ -1,32 +1,42 @@
-; HighStack 3D — Godot 4.7.2
-config_version=5
-
-[application]
+; HighStack 3D � Godot 4.7.2
+config_version=5
+
+[application]
 config/name="HighStack 3D"
-run/main_scene="res://main.tscn"
-config/features=PackedStringArray("4.7", "GL Compatibility")
-
-[display]
-window/size/viewport_width=720
-window/size/viewport_height=1280
-window/size/window_width_override=360
-window/size/window_height_override=640
-window/stretch/mode="canvas_items"
-window/handheld/orientation=1
-
-[rendering]
-renderer/rendering_method="gl_compatibility"
-renderer/rendering_method.mobile="gl_compatibility"
-textures/default_filters/use_nearest_mipmap_filter=false
-anti_aliasing/quality/msaa_3d=2
-
-[physics]
-3d/default_gravity=14.0
-3d/default_gravity_vector=Vector3(0, -1, 0)
-
-[input]
-drop={"deadzone":0.5,"events":[Object(InputEventKey,"physical_keycode":32)]}
-rotate_left={"deadzone":0.5,"events":[Object(InputEventKey,"physical_keycode":81)]}
-rotate_right={"deadzone":0.5,"events":[Object(InputEventKey,"physical_keycode":69)]}
-move_left={"deadzone":0.5,"events":[Object(InputEventKey,"physical_keycode":65)]}
-move_right={"deadzone":0.5,"events":[Object(InputEventKey,"physical_keycode":68)]}
+config/icon="res://assets/launcher.png"
+boot_splash/image="res://assets/launcher.png"
+run/main_scene="res://main.tscn"
+config/features=PackedStringArray("4.7", "GL Compatibility")
+
+[display]
+window/size/viewport_width=720
+window/size/viewport_height=1280
+window/size/window_width_override=360
+window/size/window_height_override=640
+window/stretch/mode="canvas_items"
+window/stretch/aspect="expand"
+window/handheld/orientation=1
+
+[rendering]
+renderer/rendering_method="gl_compatibility"
+renderer/rendering_method.mobile="gl_compatibility"
+textures/default_filters/use_nearest_mipmap_filter=false
+anti_aliasing/quality/msaa_3d=1
+textures/vram_compression/import_etc2_astc=true
+
+[physics]
+common/physics_ticks_per_second=120
+3d/physics_engine="GodotPhysics3D"
+3d/solver/solver_iterations=16
+3d/default_gravity=12.0
+3d/default_gravity_vector=Vector3(0, -1, 0)
+
+[input]
+drop={"deadzone":0.5,"events":[Object(InputEventKey,"physical_keycode":32)]}
+rotate_left={"deadzone":0.5,"events":[Object(InputEventKey,"physical_keycode":81)]}
+rotate_right={"deadzone":0.5,"events":[Object(InputEventKey,"physical_keycode":69)]}
+move_left={"deadzone":0.5,"events":[Object(InputEventKey,"physical_keycode":65)]}
+move_right={"deadzone":0.5,"events":[Object(InputEventKey,"physical_keycode":68)]}
+
+[editor_plugins]
+enabled=PackedStringArray("res://addons/AdmobPlugin/plugin.cfg", "res://addons/HighStackPrivacy/plugin.cfg")
