@@ -29,10 +29,12 @@ adb shell input keyevent KEYCODE_HOME
 sleep 35
 adb shell am start -W -n "$activity"
 wait_log 'HIGHSTACK_APP_OPEN: show at foreground entry'
-sleep 5
+# Allow the demo creative to finish rendering on the software-GPU emulator.
+sleep 30
 adb exec-out screencap -p > build/android-app-open-qa.png
-# App Open is dismissible; never click through to an advertiser destination.
-adb shell input keyevent KEYCODE_BACK
+# Google's App Open demo uses the observed top-right Continue to app control.
+# Android Back is not its dismissal control. Never tap the install/creative area.
+tap 1030 44
 wait_log 'HIGHSTACK_APP_OPEN: closed'
 sleep 3
 tap 105 880
