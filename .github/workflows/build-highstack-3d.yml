@@ -56,6 +56,7 @@ jobs:
       - name: Install Gradle Android source template
         run: |
           mkdir -p game/android/build
+          touch game/android/.gdignore
           unzip -q "$HOME/.local/share/godot/export_templates/4.7.2.stable/android_source.zip" -d game/android/build
           echo '4.7.2.stable' > game/android/.build_version
           chmod +x game/android/build/gradlew
