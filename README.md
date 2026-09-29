@@ -12,7 +12,7 @@ Player-facing currency amounts use the original currency icon instead of coin te
 
 App ID: ca-app-pub-7928274342057259~5038324740
 App Open: ca-app-pub-7928274342057259/8668294599 (supplied screenshot, 2026-09-29).
-Rewarded: ca-app-pub-7928274342057259/8779093357 (previously confirmed Rewarded).
+Rewarded: ca-app-pub-7928274342057259/4248869130 (new Rewarded screenshot, 2026-09-29).
 App Open never grants a reward. Only the explicit Rewarded completion grants 120.
 No banner, interstitial or rewarded-interstitial is configured.
 

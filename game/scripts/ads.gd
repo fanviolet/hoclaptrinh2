@@ -4,7 +4,7 @@ signal changed
 signal earned(amount: int)
 const REWARD_COINS = 120
 # Publisher-supplied rewarded unit; Android emulators remain Google test devices.
-const REWARDED_ID = "ca-app-pub-7928274342057259/8779093357"
+const REWARDED_ID = "ca-app-pub-7928274342057259/4248869130"
 const APP_OPEN_ID = "ca-app-pub-7928274342057259/8668294599"
 const APP_OPEN_TEST_ID = "ca-app-pub-3940256099942544/9257395921"
 const OPEN_MAX_AGE_MS = 4*60*60*1000
@@ -64,6 +64,7 @@ func _ready() -> void:
 	privacy.app_open_closed.connect(close_app_open)
 	request_privacy()
 	print("HIGHSTACK_ADS: publisher rewarded unit configured")
+	print("HIGHSTACK_ADS: Rewarded unit=%s qa=%s" % [REWARDED_ID,test_ads])
 	print("HIGHSTACK_ADS: App Open unit=%s qa=%s" % [APP_OPEN_ID,test_ads])
 
 func request_privacy() -> void:

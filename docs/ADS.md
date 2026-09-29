@@ -3,10 +3,11 @@
 | Format | Publisher unit | Placement |
 | --- | --- | --- |
 | App Open | ca-app-pub-7928274342057259/8668294599 | Eligible foreground entry into lobby |
-| Rewarded | ca-app-pub-7928274342057259/8779093357 | Voluntary reward button, +120 currency |
+| Rewarded | ca-app-pub-7928274342057259/4248869130 | Voluntary reward button, +120 currency |
 
-App ID: ca-app-pub-7928274342057259~5038324740. The new screenshot explicitly
-identifies App Open; it must not replace the existing rewarded unit. No banner,
+App ID: ca-app-pub-7928274342057259~5038324740. Both screenshot formats are wired
+separately. The new Rewarded unit replaces /8779093357, which returned HTTP 403.
+No banner,
 interstitial or rewarded-interstitial is configured.
 
 Native Google Mobile Ads 24.9.0, AdmobPlugin v7.0 and custom App Open/UMP bridge.
@@ -39,9 +40,8 @@ The production APK retains publisher IDs. See build logs for actual fill results
 The 0.5.0 run reported UMP publisher misconfiguration (no published form) and
 Rewarded no-fill (code 3). These are checked again for 0.6.0. The publisher must
 complete app readiness and Privacy & messaging, including applicable published
-forms and a privacy policy. If the old rewarded unit was created exclusively for
-third-party Partner bidding, provide a standard AdMob Rewarded unit for this direct
-SDK integration. The name Facebook alone does not enable Meta Audience Network.
+forms and a privacy policy. The new Rewarded screenshot provides a direct SDK
+unit; the old unit is no longer requested. Meta Audience Network is not enabled.
 No publisher password is needed.
 
 References:

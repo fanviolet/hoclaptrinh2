@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 package=com.highstackstudio.highstack3d
+# Half-resolution emulator keeps software GPU load below system ANR limits.
+tap() { adb shell input tap "$(( $1 / 2 ))" "$(( $2 / 2 ))"; }
 collect() {
   adb logcat -d > build/android-logcat.txt || true
   adb exec-out screencap -p > build/android-last-screen.png || true
@@ -9,46 +11,45 @@ collect() {
   fi
 }
 trap 'collect $?' EXIT
+adb shell wm size 540x960
+adb shell wm density 160
+sleep 20
 adb install --no-incremental build/HighStack3D-v0.6.0.apk
 adb shell settings put secure immersive_mode_confirmations confirmed
 adb logcat -c
 activity=$(adb shell cmd package resolve-activity --brief "$package" | tr -d '\r' | tail -n 1)
 adb shell am start -W -n "$activity"
-sleep 15
+sleep 30
 adb shell pidof "$package"
 adb exec-out screencap -p > build/android-lobby.png
 # First tap begins a round; the next drops the first block.
-adb shell input tap 540 1740
+tap 540 1740
 sleep 2
-adb shell input tap 540 1740
+tap 540 1740
 sleep 12
 adb shell pidof "$package"
 collect 0
 adb exec-out screencap -p > build/android-gameplay.png
 # Capture Store, then Ranking and Ads.
-adb shell input tap 105 410
+tap 105 410
 sleep 3
 adb exec-out screencap -p > build/android-store.png
-adb shell input tap 540 1710
+tap 540 1710
 sleep 2
-adb shell input tap 105 548
+tap 105 548
 sleep 3
 adb exec-out screencap -p > build/android-ranking.png
-adb shell input tap 540 1710
+tap 540 1710
 sleep 2
-adb shell input tap 105 880
+tap 105 880
 sleep 15
 adb exec-out screencap -p > build/android-ads.png
-# Open only our opt-in rewarded button, never any advertiser destination.
-adb shell input tap 540 575
-sleep 15
-adb exec-out screencap -p > build/android-ad-playing.png
 # Return through Settings to verify the reset route in the real APK.
 adb shell input keyevent KEYCODE_BACK
-sleep 2
-adb shell input tap 975 410
 sleep 5
-adb shell input tap 540 365
+tap 975 410
+sleep 5
+tap 540 365
 sleep 5
 adb exec-out screencap -p > build/android-reset-lobby.png
 adb logcat -d > build/android-logcat.txt

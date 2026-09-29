@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 package=com.highstackstudio.highstack3d
+# Half-resolution emulator keeps software GPU load below system ANR limits.
+tap() { adb shell input tap "$(( $1 / 2 ))" "$(( $2 / 2 ))"; }
 collect() {
   adb logcat -d > build/android-ads-qa-logcat.txt || true
   adb exec-out screencap -p > build/android-ads-qa-last.png || true
@@ -33,10 +35,10 @@ adb exec-out screencap -p > build/android-app-open-qa.png
 adb shell input keyevent KEYCODE_BACK
 wait_log 'HIGHSTACK_APP_OPEN: closed'
 sleep 3
-adb shell input tap 105 880
+tap 105 880
 sleep 4
 adb exec-out screencap -p > build/android-reward-menu-qa.png
-adb shell input tap 540 575
+tap 540 575
 wait_log 'rewarded video ad showed full screen content'
 sleep 12
 adb exec-out screencap -p > build/android-rewarded-qa.png
