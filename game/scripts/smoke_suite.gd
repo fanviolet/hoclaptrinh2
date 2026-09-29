@@ -150,8 +150,10 @@ func run(game: Node) -> void:
 	check(game.coins == retained_coins and game.best_height == retained_best and game.rescue == retained_items,"lobby reset preserves wallet, best and inventory")
 	game.return_to_lobby()
 	check(game.coins == retained_coins,"repeated lobby reset cannot duplicate earnings")
+	game.ads.privacy_busy = true
 	game.primary_action()
-	check(game.state == "running" and game.active != null and game.accepted.is_empty(),"Play starts a fresh playable run from lobby")
+	game.ads.privacy_busy = false
+	check(game.state == "running" and game.active != null and game.accepted.is_empty(),"Play starts fresh even while a background consent request is pending")
 	game.show_settings()
 	game.return_to_lobby()
 	check(not game.get_tree().paused and game.state == "lobby","settings return resets and unpauses")

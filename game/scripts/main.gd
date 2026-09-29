@@ -491,7 +491,7 @@ func dismiss_menu() -> void:
 	else: close_modal()
 
 func primary_action() -> void:
-	if ads.fullscreen or ads.privacy_busy: return
+	if ads.fullscreen: return
 	if state == "lobby": restart_run()
 	else: drop_active()
 
@@ -514,7 +514,7 @@ func _notification(what: int) -> void:
 		background_ad_eligible = false
 		ads.try_app_open(may_show)
 	elif what == NOTIFICATION_WM_GO_BACK_REQUEST:
-		if ads.fullscreen or ads.privacy_busy: return
+		if ads.fullscreen: return
 		if modal.visible: dismiss_menu()
 		elif state == "running": show_settings()
 
@@ -557,7 +557,7 @@ func _physics_process(delta: float) -> void:
 	update_ui()
 
 func _unhandled_input(event: InputEvent) -> void:
-	if modal.visible or ads.fullscreen or ads.privacy_busy or state != "running": return
+	if modal.visible or ads.fullscreen or state != "running": return
 	if event is InputEventScreenDrag:
 		move_active(event.relative)
 	elif event is InputEventMouseMotion and Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT):
