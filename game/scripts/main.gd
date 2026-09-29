@@ -499,6 +499,10 @@ func return_to_lobby() -> void:
 	restart_run(true)
 
 func _notification(what: int) -> void:
+	if what in [NOTIFICATION_APPLICATION_PAUSED,NOTIFICATION_APPLICATION_RESUMED,NOTIFICATION_WM_GO_BACK_REQUEST]:
+		call_deferred("handle_application_event",what)
+
+func handle_application_event(what: int) -> void:
 	if not is_instance_valid(ui) or not is_instance_valid(ads): return
 	if what == NOTIFICATION_APPLICATION_PAUSED:
 		background_since = Time.get_ticks_msec()
@@ -729,7 +733,6 @@ func bank_coins() -> void:
 
 func restart_run(to_lobby: bool = false) -> void:
 	bank_coins()
-	close_modal()
 	if is_instance_valid(active):
 		remove_child(active)
 		active.queue_free()
@@ -762,8 +765,11 @@ func restart_run(to_lobby: bool = false) -> void:
 	update_camera()
 	next_index = 0
 	if not to_lobby: spawn_block()
+	# Detach old bodies before reactivating paused physics spaces.
+	close_modal()
 	update_ui()
 	save_game()
+	print("HIGHSTACK_RUN: "+state)
 
 func use_stabilizer() -> void:
 	if not can_use_item("stabilizer") or accepted.is_empty(): return

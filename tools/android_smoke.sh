@@ -47,14 +47,16 @@ adb exec-out screencap -p > build/android-ad-playing.png
 adb shell input keyevent KEYCODE_BACK
 sleep 2
 adb shell input tap 975 410
-sleep 2
+sleep 5
 adb shell input tap 540 365
-sleep 3
+sleep 5
 adb exec-out screencap -p > build/android-reset-lobby.png
 adb logcat -d > build/android-logcat.txt
 grep -q 'HIGHSTACK_ADS: publisher rewarded unit configured' build/android-logcat.txt
 grep -q 'HIGHSTACK_PRIVACY:' build/android-logcat.txt
 grep -q 'HIGHSTACK_ADS: App Open unit=' build/android-logcat.txt
+test "$(grep -c 'HIGHSTACK_RUN: lobby' build/android-logcat.txt)" -ge 2
+grep -q 'HIGHSTACK_RUN: running' build/android-logcat.txt
 if grep -E 'FATAL EXCEPTION|SCRIPT ERROR|Parse Error|Fatal signal|E godot.*ERROR:' build/android-logcat.txt; then
   exit 1
 fi
