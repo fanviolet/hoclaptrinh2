@@ -1,0 +1,11 @@
+game/.godot/
+game/assets/models/
+game/assets/audio/
+game/**/*.uid
+build/
+*.keystore
+*.zip
+
+game/android/
+game/assets/**/*.import
+game/addons/**/*.import

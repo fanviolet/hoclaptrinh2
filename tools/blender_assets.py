@@ -1,5 +1,5 @@
 import bpy, math, os, sys
-from mathutils import Vector
+from mathutils import Vector, Matrix
 
 OUT = os.path.join(os.getcwd(), 'game', 'assets', 'models')
 os.makedirs(OUT, exist_ok=True)
@@ -57,6 +57,8 @@ def cube(name, scale, loc=(0,0,0), material=None, bevel_amount=0.045):
 def cyl(name, radius, depth, loc=(0,0,0), material=None, verts=32):
     bpy.ops.mesh.primitive_cylinder_add(vertices=verts, radius=radius, depth=depth, location=loc)
     o=bpy.context.object; o.name=name
+    o.rotation_euler.x = math.pi / 2
+    bpy.ops.object.transform_apply(location=False, rotation=True, scale=False)
     if material: o.data.materials.append(material)
     bevel(o, 0.035, 2)
     return o
@@ -74,6 +76,7 @@ def uv_sphere(name, radius, loc, material, scale=(1,1,1)):
 def cone(name, radius, depth, loc, material, rot=(0,0,0)):
     bpy.ops.mesh.primitive_cone_add(vertices=24, radius1=radius, radius2=0.0, depth=depth, location=loc, rotation=rot)
     o=bpy.context.object; o.name=name; o.data.materials.append(material)
+    o.rotation_euler.x -= math.pi / 2
     bevel(o, 0.025, 2)
     return o
 
@@ -81,6 +84,10 @@ def cone(name, radius, depth, loc, material, rot=(0,0,0)):
 def export_selected(filename):
     path=os.path.join(OUT, filename)
     bpy.ops.object.select_all(action='SELECT')
+    # Author in gameplay Y-up, convert to Blender Z-up before glTF's Z->Y export.
+    conversion = Matrix.Rotation(math.pi / 2, 4, 'X')
+    for obj in bpy.context.selected_objects:
+        obj.matrix_world = conversion @ obj.matrix_world
     bpy.ops.export_scene.gltf(filepath=path, export_format='GLB', use_selection=True, export_apply=True, export_materials='EXPORT')
     print('Exported', path)
 
@@ -152,4 +159,32 @@ def mascot():
     uv_sphere('footR',0.20,(0.27,0.12,0.15),CREAM,scale=(1.1,0.55,1.4))
     export_selected('mascot.glb')
 
-for fn in (crate,book,brick,plank,can,barrel,carton,mascot): fn()
+def unusual():
+    parts = {
+        'arch': [((-0.6,-0.15,0),(0.4,0.9,0.7)),((0.6,-0.15,0),(0.4,0.9,0.7)),((0,0.45,0),(1.6,0.3,0.7))],
+        'chair': [((0,0,0),(1.1,0.22,0.95)),((0,0.4,-0.37),(1.1,0.6,0.21))]+[((x,-0.4,z),(0.22,0.6,0.22)) for x in (-0.4,0.4) for z in (-0.32,0.32)],
+        'tee': [((0,0.4,0),(1.6,0.4,0.65)),((0,-0.2,0),(0.5,0.8,0.65))],
+        'step': [((0,-0.3,0),(1.5,0.3,0.85)),((0.25,0,0),(1.0,0.3,0.85)),((0.5,0.3,0),(0.5,0.3,0.85))],
+    }
+    colors = [TEAL,PINK,BLUE,ORANGE]
+    for name, segments in parts.items():
+        clean()
+        for i,(pos,size) in enumerate(segments):
+            cube(name+str(i),size,pos,colors[i%len(colors)],0.055)
+        export_selected(name+'.glb')
+    clean()
+    cyl('saucer',0.8,0.32,(0,-0.14,0),TEAL,48)
+    cyl('cabin',0.43,0.28,(0,0.16,0),BLUE,40)
+    for i in range(8):
+        angle = i*math.tau/8
+        uv_sphere('light',0.06,(math.cos(angle)*0.71,0.045,math.sin(angle)*0.71),CREAM)
+    export_selected('ufo.glb')
+    clean()
+    cube('lucky_dice',(0.95,0.95,0.95),(0,0,0),PINK,0.11)
+    for x,z in [(-0.23,-0.23),(0.23,0.23),(0,0),(-0.23,0.23),(0.23,-0.23)]:
+        uv_sphere('pip',0.055,(x,0.472,z),WHITE,(1,0.12,1))
+    for x,y in [(-0.23,-0.23),(0.23,0.23),(0,0)]:
+        uv_sphere('pip',0.055,(x,y,0.472),WHITE,(1,1,0.12))
+    export_selected('dice.glb')
+
+for fn in (crate,book,brick,plank,can,barrel,carton,mascot,unusual): fn()
