@@ -3,6 +3,13 @@ extends RefCounted
 var failures: Array[String] = []
 var checks = 0
 
+class FakeOpenBridge extends RefCounted:
+	var shows = 0
+	var loads = 0
+	func show_app_open(): shows += 1
+	func load_app_open(_unit): loads += 1
+	func clear_app_open(): pass
+
 func check(condition: bool, description: String) -> void:
 	checks += 1
 	if not condition:
@@ -129,7 +136,25 @@ func run(game: Node) -> void:
 	await game.get_tree().physics_frame
 	await game.get_tree().physics_frame
 	check(game.state == "ended","uncaught fall ends run")
-	game.close_modal()
+	check(game.modal_close_button.text == "MAIN LOBBY","results provide return-to-lobby action")
+	var retained_coins = game.coins
+	var retained_best = game.best_height
+	var retained_items = game.rescue.duplicate()
+	game.manual_x = 1.5
+	game.settle_time = 0.4
+	game.drop_age = 10
+	game.dismiss_menu()
+	check(game.state == "lobby" and not game.modal.visible and not game.get_tree().paused,"results dismiss into an interactive lobby")
+	check(game.active == null and game.accepted.is_empty() and game.score == 0 and game.height_m == 0 and game.camera_height == 0,"return to lobby clears tower, score and camera")
+	check(game.drop_age == 0 and game.settle_time == 0 and game.manual_x == 0 and not game.safety_armed,"return to lobby clears falling and input state")
+	check(game.coins == retained_coins and game.best_height == retained_best and game.rescue == retained_items,"lobby reset preserves wallet, best and inventory")
+	game.return_to_lobby()
+	check(game.coins == retained_coins,"repeated lobby reset cannot duplicate earnings")
+	game.primary_action()
+	check(game.state == "running" and game.active != null and game.accepted.is_empty(),"Play starts a fresh playable run from lobby")
+	game.show_settings()
+	game.return_to_lobby()
+	check(not game.get_tree().paused and game.state == "lobby","settings return resets and unpauses")
 	var rows = game.Ranking.top50(0)
 	check(rows.size()==50,"Ranking starts with exactly 50 seeded records")
 	var sorted_ok = true
@@ -165,6 +190,36 @@ func run(game: Node) -> void:
 	game.show_ads()
 	check(game.watch_ad_button.disabled,"desktop cannot pretend to show a native ad")
 	game.close_modal()
+	# App Open is never rewarded and can show only at an eligible foreground boundary.
+	var bridge = FakeOpenBridge.new()
+	game.ads.privacy = bridge
+	game.ads.sdk_ready = true
+	game.ads.consent_allowed = true
+	game.ads.last_fullscreen_at = -game.ads.OPEN_COOLDOWN_MS
+	game.ads.app_open_loaded_at = Time.get_ticks_msec()
+	check(not game.ads.try_app_open(false) and bridge.shows == 0,"App Open cannot interrupt gameplay or a modal")
+	game.ads.fullscreen = true
+	check(not game.ads.try_app_open(true),"App Open cannot overlap rewarded fullscreen content")
+	game.ads.fullscreen = false
+	game.ads.consent_allowed = false
+	check(not game.ads.try_app_open(true),"App Open requires UMP permission")
+	game.ads.consent_allowed = true
+	check(game.ads.try_app_open(true) and bridge.shows == 1,"eligible foreground entry displays preloaded App Open once")
+	check(not game.ads.try_app_open(true) and bridge.shows == 1,"duplicate foreground callback cannot double-show")
+	var before_open_close = game.coins
+	game.ads.close_app_open()
+	check(not game.ads.fullscreen and game.coins == before_open_close,"App Open dismissal releases fullscreen and grants no reward")
+	game.ads.app_open_loaded_at = Time.get_ticks_msec()
+	check(not game.ads.try_app_open(true),"fullscreen cooldown prevents immediate repeat")
+	game.ads.last_fullscreen_at = -game.ads.OPEN_COOLDOWN_MS
+	game.ads.app_open_loaded_at = -1
+	game.ads.app_open_loading = false
+	check(not game.ads.try_app_open(true) and bridge.loads > 0,"missing ad preloads without delaying entry or showing late")
+	game.ads.app_open_loaded_at = Time.get_ticks_msec()-game.ads.OPEN_MAX_AGE_MS
+	check(not game.ads.app_open_fresh(),"App Open cache expires after four hours")
+	game.ads.privacy = null
+	game.ads.sdk_ready = false
+	game.ads.consent_allowed = false
 	print("HIGHSTACK_SMOKE: %d checks, %d failures" % [checks,failures.size()])
 	var output = {"checks":checks,"failures":failures,"engine":Engine.get_version_info().string}
 	var report = FileAccess.open("user://smoke-report.json",FileAccess.WRITE)

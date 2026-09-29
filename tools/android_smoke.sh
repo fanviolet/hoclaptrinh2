@@ -9,13 +9,17 @@ collect() {
   fi
 }
 trap 'collect $?' EXIT
-adb install --no-incremental build/HighStack3D-v0.5.0.apk
+adb install --no-incremental build/HighStack3D-v0.6.0.apk
 adb shell settings put secure immersive_mode_confirmations confirmed
 adb logcat -c
 activity=$(adb shell cmd package resolve-activity --brief "$package" | tr -d '\r' | tail -n 1)
 adb shell am start -W -n "$activity"
 sleep 15
 adb shell pidof "$package"
+adb exec-out screencap -p > build/android-lobby.png
+# First tap begins a round; the next drops the first block.
+adb shell input tap 540 1740
+sleep 2
 adb shell input tap 540 1740
 sleep 12
 adb shell pidof "$package"
@@ -36,12 +40,21 @@ adb shell input tap 105 880
 sleep 15
 adb exec-out screencap -p > build/android-ads.png
 # Open only our opt-in rewarded button, never any advertiser destination.
-adb shell input tap 540 545
+adb shell input tap 540 575
 sleep 15
 adb exec-out screencap -p > build/android-ad-playing.png
+# Return through Settings to verify the reset route in the real APK.
+adb shell input keyevent KEYCODE_BACK
+sleep 2
+adb shell input tap 975 410
+sleep 2
+adb shell input tap 540 365
+sleep 3
+adb exec-out screencap -p > build/android-reset-lobby.png
 adb logcat -d > build/android-logcat.txt
 grep -q 'HIGHSTACK_ADS: publisher rewarded unit configured' build/android-logcat.txt
 grep -q 'HIGHSTACK_PRIVACY:' build/android-logcat.txt
+grep -q 'HIGHSTACK_ADS: App Open unit=' build/android-logcat.txt
 if grep -E 'FATAL EXCEPTION|SCRIPT ERROR|Parse Error|Fatal signal|E godot.*ERROR:' build/android-logcat.txt; then
   exit 1
 fi

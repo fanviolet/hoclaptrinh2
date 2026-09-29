@@ -1,7 +1,7 @@
-# Build 0.5.0
+# Build 0.6.0
 
 Godot 4.7.2 / Blender 5.2.1; Android ARM64+x86_64 Gradle APK.
-Bungee/Nunito fonts, illustrated Store and Top 50 podium, custom launcher icon.
-Ranked gameplay removed. Leaderboard remains seeded locally.
-Publisher AdMob app/rewarded unit configured; UMP 4.0.0 gates native ad requests.
-87 smoke checks; CI is authoritative for native compilation and runtime results.
+Dedicated lobby/reset lifecycle, currency icons throughout player-facing UI,
+separate publisher App Open and Rewarded units, UMP request gate.
+104 runtime smoke checks. Native CI separately tests production configuration and
+Google demo ad load/show/dismiss flows using an unshipped QA APK.

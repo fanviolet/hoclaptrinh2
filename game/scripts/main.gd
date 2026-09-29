@@ -45,7 +45,15 @@ var status: Label
 var inventory: Label
 var record_hud: Label
 var root_column: VBoxContainer
-var state = "running"
+var state = "lobby"
+var launch_count = 0
+var background_since = -1
+var background_ad_eligible = false
+var primary_button: Button
+var rotate_buttons: Array[Button] = []
+var modal_close_button: Button
+var status_currency: TextureRect
+var control_hint: Label
 var height_m = 0.0
 var height_record = 0.0
 var score = 0
@@ -87,7 +95,8 @@ func _ready() -> void:
 	ads.earned.connect(on_ad_reward)
 	ads.changed.connect(refresh_ad_menu)
 	add_child(ads)
-	restart_run()
+	launch_count += 1
+	return_to_lobby()
 	if test_mode: call_deferred("run_smoke")
 	if "--capture" in OS.get_cmdline_user_args(): call_deferred("capture_preview")
 
@@ -287,11 +296,22 @@ func build_ui() -> void:
 	record_hud = label("",19)
 	record_hud.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	root_column.add_child(record_hud)
+	var status_row = HBoxContainer.new()
+	status_row.alignment = BoxContainer.ALIGNMENT_CENTER
+	root_column.add_child(status_row)
+	status_currency = TextureRect.new()
+	status_currency.texture = icon("coin")
+	status_currency.custom_minimum_size = Vector2(30,30)
+	status_currency.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	status_currency.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	status_currency.visible = false
+	status_row.add_child(status_currency)
 	status = label("",22)
+	status.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	status.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	status.custom_minimum_size.y = 56
-	root_column.add_child(status)
+	status_row.add_child(status)
 	var spacer = Control.new()
 	spacer.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	spacer.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -307,7 +327,7 @@ func build_ui() -> void:
 	side_button(left,"store",t("Cửa hàng","Store"),show_store)
 	side_button(left,"ranking",t("Xếp hạng","Top 50"),show_ranking)
 	side_button(left,"skills",t("Kỹ năng","Skills"),show_skills)
-	side_button(left,"ads",t("Nhận coin","Free coins"),show_ads)
+	side_button(left,"coin",t("Nhận thưởng","Rewards"),show_ads)
 	side_button(right,"settings",t("Cài đặt","Settings"),show_settings)
 	item_buttons.stabilizer = side_button(right,"stabilizer",t("Giữ vững","Stabilize"),use_stabilizer)
 	item_buttons.safety = side_button(right,"safety",t("Cứu rơi","Safety"),arm_safety)
@@ -315,12 +335,15 @@ func build_ui() -> void:
 	var row = HBoxContainer.new()
 	row.add_theme_constant_override("separation",8)
 	root_column.add_child(row)
-	button(row,"↶",func(): rotate_active(-15))
-	var drop = button(row,t("THẢ KHỐI","DROP"),drop_active)
+	rotate_buttons.clear()
+	rotate_buttons.append(button(row,"↶",func(): rotate_active(-15)))
+	var drop = button(row,t("BẮT ĐẦU","PLAY"),primary_action)
+	primary_button = drop
 	drop.custom_minimum_size = Vector2(280,82)
 	drop.add_theme_stylebox_override("normal",style(Color("139e9e")))
-	button(row,"↷",func(): rotate_active(15))
+	rotate_buttons.append(button(row,"↷",func(): rotate_active(15)))
 	var hint = label(t("Kéo để di chuyển • Xoay rồi thả","Drag to move • Rotate and drop"),20)
+	control_hint = hint
 	hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	hint.add_theme_color_override("font_color",Color("ffffff"))
 	root_column.add_child(hint)
@@ -354,7 +377,7 @@ func build_ui() -> void:
 	modal_body.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	modal_body.add_theme_constant_override("separation",12)
 	scroll.add_child(modal_body)
-	button(column,t("Đóng / Tiếp tục","Close / Resume"),close_modal)
+	modal_close_button = button(column,t("Đóng","Close"),dismiss_menu)
 	update_ui()
 
 func icon(key: String) -> Texture2D:
@@ -444,6 +467,7 @@ func note(text: String) -> void:
 	modal_body.add_child(node)
 
 func message(vi: String, en: String) -> void:
+	status_currency.visible = false
 	status.text = t(vi,en)
 	status_time = 2.5
 
@@ -453,6 +477,7 @@ func show_modal(title: String) -> void:
 	for child in modal_body.get_children():
 		modal_body.remove_child(child)
 		child.queue_free()
+	modal_close_button.text = t("VỀ SẢNH","MAIN LOBBY") if state == "ended" else t("Đóng / Tiếp tục","Close / Resume")
 	modal_title.text = title
 	modal.visible = true
 
@@ -461,17 +486,42 @@ func close_modal() -> void:
 	ui.get_node("Shade").visible = false
 	get_tree().paused = false
 
+func dismiss_menu() -> void:
+	if state == "ended": return_to_lobby()
+	else: close_modal()
+
+func primary_action() -> void:
+	if ads.fullscreen or ads.privacy_busy: return
+	if state == "lobby": restart_run()
+	else: drop_active()
+
+func return_to_lobby() -> void:
+	restart_run(true)
+
 func _notification(what: int) -> void:
-	if what == NOTIFICATION_APPLICATION_PAUSED and is_instance_valid(ui):
+	if not is_instance_valid(ui) or not is_instance_valid(ads): return
+	if what == NOTIFICATION_APPLICATION_PAUSED:
+		background_since = Time.get_ticks_msec()
+		background_ad_eligible = state == "lobby" and not modal.visible and not ads.fullscreen and not ads.privacy_busy
 		bank_coins()
 		save_game()
-		if not ads.fullscreen and not ads.privacy_busy: show_settings()
+		if state == "running" and not ads.fullscreen and not ads.privacy_busy: show_settings()
+	elif what == NOTIFICATION_APPLICATION_RESUMED:
+		var away_long_enough = background_since >= 0 and Time.get_ticks_msec()-background_since >= 30000
+		var experienced = launch_count >= 3 or ads.test_ads
+		var may_show = background_ad_eligible and away_long_enough and experienced and state == "lobby" and not modal.visible
+		background_since = -1
+		background_ad_eligible = false
+		ads.try_app_open(may_show)
+	elif what == NOTIFICATION_WM_GO_BACK_REQUEST:
+		if ads.fullscreen or ads.privacy_busy: return
+		if modal.visible: dismiss_menu()
+		elif state == "running": show_settings()
 
 func _physics_process(delta: float) -> void:
 	if state != "running": return
 	elapsed += delta
 	impact_cooldown = maxf(0,impact_cooldown-delta)
-	status_time = maxf(0,status_time-delta)
 	recalculate_height()
 	if mascot and settings.motion: mascot.rotation.y = sin(elapsed)*0.16
 	if is_instance_valid(active):
@@ -507,7 +557,7 @@ func _physics_process(delta: float) -> void:
 	update_ui()
 
 func _unhandled_input(event: InputEvent) -> void:
-	if modal.visible or state != "running": return
+	if modal.visible or ads.fullscreen or ads.privacy_busy or state != "running": return
 	if event is InputEventScreenDrag:
 		move_active(event.relative)
 	elif event is InputEventMouseMotion and Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT):
@@ -529,6 +579,8 @@ func move_active(relative: Vector2) -> void:
 	manual_z = clampf(manual_z + (relative.x*camera.global_basis.x.z+relative.y*0.8)*0.011,-1.8,1.8)
 
 func _process(delta: float) -> void:
+	status_time = maxf(0,status_time-delta)
+	if status_time <= 0 and is_instance_valid(status_currency): status_currency.visible = false
 	if state == "running": update_camera(delta)
 
 func update_camera(delta: float = 0.0) -> void:
@@ -666,14 +718,16 @@ func finish_run(collapsed: bool) -> void:
 	save_game()
 	audio.play("lose" if collapsed else "win")
 	show_modal(t("Kết quả","Results"))
-	note(t("Chiều cao: %.1f m\nĐiểm: %d\nCoin kiếm được: %d","Height: %.1f m\nScore: %d\nCoins earned: %d") % [height_record,score,run_coins])
-	button(modal_body,t("Chơi lại","Play again"),restart_run)
+	note(t("Chiều cao: %.1f m\nĐiểm: %d","Height: %.1f m\nScore: %d") % [height_record,score])
+	var earnings = stat_pill(modal_body,"coin")
+	earnings.text = "+%d" % run_coins
+	update_ui()
 
 func bank_coins() -> void:
 	coins += maxi(0,run_coins-paid_coins)
 	paid_coins = run_coins
 
-func restart_run() -> void:
+func restart_run(to_lobby: bool = false) -> void:
 	bank_coins()
 	close_modal()
 	if is_instance_valid(active):
@@ -693,11 +747,21 @@ func restart_run() -> void:
 	combo = 0
 	safety_armed = false
 	spawn_wait = 0
-	state = "running"
+	state = "lobby" if to_lobby else "running"
+	drop_age = 0.0
+	settle_time = 0.0
+	elapsed = 0.0
+	impact_cooldown = 0.0
+	manual_x = 0.0
+	manual_z = 0.0
+	drop_origin = Vector3.ZERO
+	status_time = 0.0
+	status_currency.visible = false
+	ghost.visible = false
 	camera_goal = 0.0
 	update_camera()
 	next_index = 0
-	spawn_block()
+	if not to_lobby: spawn_block()
 	update_ui()
 	save_game()
 
@@ -762,7 +826,7 @@ func show_store() -> void:
 	bank_coins()
 	show_modal(t("CỬA HÀNG","STORE"))
 	var wallet = stat_pill(modal_body,"coin")
-	wallet.text = t("%d coin","%d coins") % coins
+	wallet.text = str(coins)
 	note(t("TRỢ THỦ XẾP THÁP","TOWER BOOSTERS"))
 	for item in [
 		["stabilizer",250,t("GIỮ VỮNG","STABILIZER"),t("Giảm rung lắc, giúp tháp đứng vững.","Calm the tower and steady your stack.")],
@@ -793,10 +857,13 @@ func show_store() -> void:
 		content.add_child(label(item[2],24))
 		var owned = item[0] in owned_themes
 		var active_theme = selected_theme == item[0]
-		var caption = t("ĐANG DÙNG","EQUIPPED") if active_theme else (t("SỬ DỤNG","EQUIP") if owned else t("MUA • %d coin","BUY • %d coins") % item[1])
+		var caption = t("ĐANG DÙNG","EQUIPPED") if active_theme else (t("SỬ DỤNG","EQUIP") if owned else t("MUA • %d","BUY • %d") % item[1])
 		var buy = button(content,caption,func(): buy_theme(item[0],item[1]))
+		if not owned:
+			buy.icon = icon("coin")
+			buy.add_theme_constant_override("icon_max_width",28)
 		buy.disabled = active_theme or (not owned and coins < item[1])
-	note(t("Xếp tháp hoặc xem quảng cáo để kiếm thêm coin.","Stack towers or watch ads to earn more coins."))
+	note(t("Xếp tháp hoặc xem quảng cáo để nhận thêm phần thưởng.","Stack towers or watch ads to earn more rewards."))
 
 func buy_item(key: String, cost: int) -> void:
 	var prices = {"stabilizer":250,"safety":400,"undo":500}
@@ -839,8 +906,10 @@ func show_skills() -> void:
 	for i in range(skills.size()):
 		var level = int(skills[i])
 		var text = "%s  %d/5" % [t(SKILL_NAMES[i][0],SKILL_NAMES[i][1]),level]
-		if level < 5: text += " • %d coin" % COSTS[level]
+		if level < 5: text += " • %d" % COSTS[level]
 		var node = button(modal_body,text,func(): upgrade_skill(i))
+		node.icon = icon("coin")
+		node.add_theme_constant_override("icon_max_width",28)
 		node.disabled = level >= 5 or coins < COSTS[mini(level,4)]
 
 func upgrade_skill(index: int) -> void:
@@ -855,7 +924,7 @@ func show_settings() -> void:
 	show_modal(t("CÀI ĐẶT","SETTINGS"))
 	privacy_button = button(modal_body,t("Quyền riêng tư quảng cáo","Ad privacy choices"),func(): ads.show_privacy_options())
 	privacy_button.visible = is_instance_valid(ads) and ads.privacy_required
-	button(modal_body,t("Chơi lại lượt hiện tại","Restart current run"),restart_run)
+	if state == "running": button(modal_body,t("VỀ SẢNH","MAIN LOBBY"),return_to_lobby)
 	for pair in [["music",t("Nhạc nền","Music")],["sfx",t("Hiệu ứng âm thanh","Sound effects")]]:
 		note(pair[1])
 		var slider = HSlider.new()
@@ -937,13 +1006,15 @@ func show_ranking() -> void:
 		row.add_child(label("%.2f m" % entry.height,22))
 
 func show_ads() -> void:
-	show_modal(t("NHẬN COIN","FREE COINS"))
-	note(t("Xem hết quảng cáo thưởng để nhận 120 coin.","Complete a rewarded ad to earn 120 coins."))
+	show_modal(t("PHẦN THƯỞNG","REWARDS"))
+	note(t("Xem hết quảng cáo để nhận thưởng.","Complete the ad to collect your reward."))
+	var reward_value = stat_pill(modal_body,"coin")
+	reward_value.text = "+120"
 	ads_status_label = label("",22)
 	ads_status_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	modal_body.add_child(ads_status_label)
-	watch_ad_button = button(modal_body,t("Xem quảng cáo • +120 coin","Watch ad • +120 coins"),func(): ads.show_reward())
-	watch_ad_button.icon = icon("ads")
+	watch_ad_button = button(modal_body,t("Xem quảng cáo • +120","Watch ad • +120"),func(): ads.show_reward())
+	watch_ad_button.icon = icon("coin")
 	watch_ad_button.add_theme_constant_override("icon_max_width",40)
 	button(modal_body,t("Thử tải lại","Retry loading"),func(): ads.load_reward())
 	refresh_ad_menu()
@@ -969,7 +1040,8 @@ func on_ad_reward(amount: int) -> void:
 	coins += amount
 	save_game()
 	update_ui()
-	message("Đã nhận %d coin!" % amount,"Received %d coins!" % amount)
+	message("Đã nhận +%d" % amount,"Received +%d" % amount)
+	status_currency.visible = true
 	audio.play("coin")
 
 func update_ui() -> void:
@@ -983,6 +1055,11 @@ func update_ui() -> void:
 		node.get_node("Content/Count").text = str(rescue[key])+(" ✓" if key == "safety" and safety_armed else "")
 		node.disabled = state != "running"
 	record_hud.text = t("KỶ LỤC: %.1f m","BEST: %.1f m") % best_height
+	primary_button.text = t("BẮT ĐẦU","PLAY") if state == "lobby" else t("THẢ KHỐI","DROP")
+	primary_button.disabled = state == "ended"
+	control_hint.text = t("Chạm BẮT ĐẦU để xây tháp","Tap PLAY to build your tower") if state == "lobby" else t("Kéo để di chuyển • Xoay rồi thả","Drag to move • Rotate and drop")
+	for rotation_button in rotate_buttons: rotation_button.visible = state == "running"
+	if state == "lobby" and status_time <= 0: status.text = t("SẴN SÀNG XÂY THÁP?","READY TO BUILD?")
 	if status_time <= 0 and is_instance_valid(active):
 		var spec = active.get_meta("spec")
 		var next = Catalog.BLOCKS[next_index]
@@ -991,6 +1068,7 @@ func update_ui() -> void:
 func load_save() -> void:
 	var config = ConfigFile.new()
 	if config.load(save_path) != OK: return
+	launch_count = maxi(0,int(config.get_value("player","launch_count",0)))
 	coins = maxi(0,int(config.get_value("player","coins",900)))
 	best_score = maxi(0,int(config.get_value("player","best_score",0)))
 	best_height = maxf(0,float(config.get_value("player","best_height",0)))
@@ -1015,7 +1093,7 @@ func load_save() -> void:
 
 func save_game() -> void:
 	var config = ConfigFile.new()
-	for pair in [["coins",coins],["best_score",best_score],["best_height",best_height],["skills",skills],["rescue",rescue],["themes",owned_themes],["theme",selected_theme]]:
+	for pair in [["launch_count",launch_count],["coins",coins],["best_score",best_score],["best_height",best_height],["skills",skills],["rescue",rescue],["themes",owned_themes],["theme",selected_theme]]:
 		config.set_value("player",pair[0],pair[1])
 	for key in settings: config.set_value("settings",key,settings[key])
 	var error = config.save(save_path+".tmp")
@@ -1028,6 +1106,7 @@ func run_smoke() -> void:
 	await suite.run(self)
 
 func capture_preview() -> void:
+	restart_run()
 	set_physics_process(false)
 	set_process(false)
 	if is_instance_valid(active):
@@ -1062,4 +1141,17 @@ func capture_preview() -> void:
 	await get_tree().process_frame
 	await RenderingServer.frame_post_draw
 	get_viewport().get_texture().get_image().save_png("res://../build/ranking.png")
+	return_to_lobby()
+	await get_tree().process_frame
+	await RenderingServer.frame_post_draw
+	get_viewport().get_texture().get_image().save_png("res://../build/lobby.png")
+	restart_run()
+	finish_run(false)
+	await get_tree().process_frame
+	await RenderingServer.frame_post_draw
+	get_viewport().get_texture().get_image().save_png("res://../build/results.png")
+	show_ads()
+	await get_tree().process_frame
+	await RenderingServer.frame_post_draw
+	get_viewport().get_texture().get_image().save_png("res://../build/ads.png")
 	get_tree().quit()
